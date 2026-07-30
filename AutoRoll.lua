@@ -207,8 +207,10 @@ local function BuildUI()
     end
 
     local helpBox = CreateFrame("Frame", nil, settingsFrame)
-    helpBox:SetSize(440, 185)
-    helpBox:SetPoint("TOP", settingsFrame, "TOP", 0, -485)
+    -- Height increased to 200 pixels to provide plenty of layout space
+    helpBox:SetSize(440, 200)
+    -- Shifted position to align perfectly with the updated dimensions
+    helpBox:SetPoint("TOP", settingsFrame, "TOP", 0, -475)
     helpBox:SetBackdrop({
         bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
