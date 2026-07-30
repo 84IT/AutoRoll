@@ -1,4 +1,4 @@
--- Configuration Defaults Profile with added Stat Scoring Module Data structures
+-- Configuration Defaults Profile with added Stat Weight Matrices
 local defaults = {
     enabled = true,
     timeThreshold = 5,
@@ -6,84 +6,93 @@ local defaults = {
     buttonX = 0,
     buttonY = 150,
     bulkArmor = 0, bulkWeapons = 0, bulkQuality = 0,
-    armor = { ["Cloth"] = 0, ["Leather"] = 0, ["Mail"] = 0, ["Plate"] = 0 },
+    armor = { ["Cloth"] = 0, ["Leather"] = 0, ["Mail"] = 0, ["Plate"] = 0, ["Shields"] = 0 },
     weapons = {
         ["Daggers"] = 0, ["One-Handed Swords"] = 0, ["Two-Handed Swords"] = 0, ["One-Handed Maces"] = 0,
-        ["Two-Handed Maces"] = 0, ["One-Handed Axes"] = 0, ["Two-Handed Axes"] = 0, ["Staves"] = 0, ["Bows"] = 0, ["Guns"] = 0
+        ["Two-Handed Maces"] = 0, ["One-Handed Axes"] = 0, ["Two-Handed Axes"] = 0, ["Staves"] = 0, ["Bows"] = 0, ["Guns"] = 0,
+        ["Crossbows"] = 0
     },
     quality = { ["Green"] = 0, ["Blue"] = 0, ["Purple"] = 0 },
     
-    -- Smart Stat Module Configuration Tables
+    -- Smart Stat Module Global Switch
     statModuleEnabled = false,
-    mainStatWeight = 10,
-    secStatWeight = 5,
-    selectedMainStat = "Intellect",
-    selectedSecStat = "Agility",
+    
+    -- Full Decimal Stat Weight Dictionary Table
+    weights = {
+        ["Strength"] = 0, ["Agility"] = 1.878, ["Stamina"] = 0, ["Intellect"] = 1.205, ["Spirit"] = 0,
+        ["Crit"] = 0.644, ["Hit"] = 0, ["Haste"] = 0.6, ["Spell Power"] = 1, ["Attack Power"] = 1,
+        ["PvE Power"] = 0, ["Armor Pen"] = 0.3, ["Weapon DPS"] = 14, ["Ranged DPS"] = 14,
+        ["Spell Damage"] = 1, ["Healing Power"] = 0, ["Resilience"] = 0, ["Mana per 5"] = 0
+    }
 }
-
--- Comprehensive raw text matching index dictionary for item scanning parsing loops
+-- Mapping database translating tooltip string text matching rules to database indices
 local STAT_PATTERNS = {
-    ["Strength"]  = "%+(%d+) Strength",
-    ["Agility"]   = "%+(%d+) Agility",
-    ["Stamina"]   = "%+(%d+) Stamina",
-    ["Intellect"] = "%+(%d+) Intellect",
-    ["Spirit"]    = "%+(%d+) Spirit",
+    { key = "Strength",     pats = { "%+(%d+) Strength", "%+(%d+) strength" } },
+    { key = "Agility",      pats = { "%+(%d+) Agility", "%+(%d+) agility" } },
+    { key = "Stamina",      pats = { "%+(%d+) Stamina", "%+(%d+) stamina" } },
+    { key = "Intellect",    pats = { "%+(%d+) Intellect", "%+(%d+) intellect" } },
+    { key = "Spirit",       pats = { "%+(%d+) Spirit", "%+(%d+) spirit" } },
+    { key = "Crit",         pats = { "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)" } },
+    { key = "Hit",          pats = { "hit rating", "Hit Rating", "Improves hit rating by (%d+)" } },
+    { key = "Haste",        pats = { "haste rating", "Haste Rating", "Improves haste rating by (%d+)" } },
+    { key = "Spell Power",  pats = { "spell power", "Spell Power", "Increases spell power by (%d+)" } },
+    { key = "Attack Power", pats = { "attack power", "Attack Power", "Increases attack power by (%d+)" } },
+    { key = "PvE Power",    pats = { "pve power", "PvE Power", "Increases PvE Power by (%d+)" } },
+    { key = "Armor Pen",    pats = { "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)" } },
+    { key = "Weapon DPS",   pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
+    { key = "Ranged DPS",   pats = { "Ranged.*((%d+%.?%d*)) damage per second" } },
+    { key = "Spell Damage", pats = { "Increases spell damage by (%d+)" } },
+    { key = "Healing Power",pats = { "Increases healing power by (%d+)" } },
+    { key = "Resilience",   pats = { "resilience rating", "Resilience" } },
+    { key = "Mana per 5",   pats = { "mana per 5 sec", "Restores (%d+) mana per 5" } }
 }
 
 -- Hidden tooltip structure to scan item requirements and extract raw stats numbers
 local scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
-scannerTooltip:SetOwner(WorldFrame, "SHOPPING_TOOLTIP_HAS_ITEM")
-
 local function IsItemUnusable(itemLink)
     if not itemLink then return false end
+    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
     scannerTooltip:ClearLines()
     scannerTooltip:SetHyperlink(itemLink)
+    local unusable = false
     for i = 1, scannerTooltip:NumLines() do
         local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
         if leftLine then
             local r, g, b = leftLine:GetTextColor()
-            if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 then return true end
+            if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 then unusable = true break end
         end
     end
-    return false
+    scannerTooltip:Hide()
+    return unusable
 end
 
--- Deep tooltip string parsing calculator engine
+-- Advanced full tooltip mathematical weight calculation matrix scanner engine
 local function CalculateItemScore(itemLink)
-    if not itemLink then return 0 end
+    if not itemLink or not AutoRollConfig or not AutoRollConfig.weights then return 0 end
+    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
     scannerTooltip:ClearLines()
     scannerTooltip:SetHyperlink(itemLink)
-    
-    local mainStat = (AutoRollConfig and AutoRollConfig.selectedMainStat) or "Intellect"
-    local secStat = (AutoRollConfig and AutoRollConfig.selectedSecStat) or "Agility"
-    local patternMain = STAT_PATTERNS[mainStat]
-    local patternSec = STAT_PATTERNS[secStat]
-    
-    local totalMainFound = 0
-    local totalSecFound = 0
-    
+    local totalScore = 0
     for i = 1, scannerTooltip:NumLines() do
         local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
         if leftLine then
             local text = leftLine:GetText()
             if text then
-                if patternMain then
-                    local match = string.match(text, patternMain)
-                    if match then totalMainFound = totalMainFound + (tonumber(match) or 0) end
-                end
-                if patternSec then
-                    local match = string.match(text, patternSec)
-                    if match then totalSecFound = totalSecFound + (tonumber(match) or 0) end
+                for _, item in ipairs(STAT_PATTERNS) do
+                    local weight = AutoRollConfig.weights[item.key] or 0
+                    if weight > 0 then
+                        for _, pattern in ipairs(item.pats) do
+                            local match = string.match(text, pattern)
+                            if match then totalScore = totalScore + (tonumber(match) * weight) break end
+                        end
+                    end
                 end
             end
         end
     end
-    
-    local wMain = (AutoRollConfig and AutoRollConfig.mainStatWeight) or 10
-    local wSec = (AutoRollConfig and AutoRollConfig.secStatWeight) or 5
-    return (totalMainFound * wMain) + (totalSecFound * wSec)
+    scannerTooltip:Hide()
+    return totalScore
 end
-
 local handledRolls = {}
 local mainFrame = CreateFrame("Frame")
 mainFrame:RegisterEvent("ADDON_LOADED")
@@ -91,16 +100,28 @@ mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("START_LOOT_ROLL")
 mainFrame:RegisterEvent("CANCEL_LOOT_ROLL")
 
+local function CloseActiveLootFrame(rollID)
+    for i = 1, 4 do
+        local rollFrame = _G["GroupLootFrame" .. i]
+        if rollFrame and rollFrame:IsShown() and rollFrame.rollID == rollID then
+            rollFrame:Hide()
+            break
+        end
+    end
+end
+
 local function ExecuteRollChoice(rollID, choiceCode, itemLink, reason)
     if choiceCode and choiceCode >= 1 and choiceCode <= 3 then
         handledRolls[rollID] = true
         RollOnLoot(rollID, choiceCode == 3 and 0 or choiceCode)
+        CloseActiveLootFrame(rollID)
         local rollNames = { "Need", "Greed", "Pass" }
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AutoRoll]|r Auto-" .. rollNames[choiceCode] .. ": " .. itemLink .. " (" .. reason .. ")")
         return true
     end
     return false
 end
+
 -- Maps global WoW item locations over to standard physical container gear slots
 local SLOT_MAP = {
     ["INVTYPE_HEAD"] = 1, ["INVTYPE_NECK"] = 2, ["INVTYPE_SHOULDER"] = 3, ["INVTYPE_BODY"] = 4,
@@ -110,81 +131,90 @@ local SLOT_MAP = {
     ["INVTYPE_RANGED"] = 18, ["INVTYPE_2HWEAPON"] = 16, ["INVTYPE_WEAPONMAINHAND"] = 16,
     ["INVTYPE_WEAPONOFFHAND"] = 17, ["INVTYPE_HOLDABLE"] = 17, ["INVTYPE_RANGEDRIGHT"] = 18
 }
-
 local alertTextString
 local function ProcessLootRoll(rollID, itemLink)
     if not AutoRollConfig or not AutoRollConfig.enabled or handledRolls[rollID] then return end
     local itemName, _, itemRarity, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     if not itemName then return end
-    
-    if AutoRollConfig.autoGreedUnusable and IsItemUnusable(itemLink) then
-        if ExecuteRollChoice(rollID, 2, itemLink, "Unusable") then return end
+    local rarityKey = nil
+    if itemRarity == 2 then rarityKey = "Green"
+    elseif itemRarity == 3 then rarityKey = "Blue"
+    elseif itemRarity == 4 then rarityKey = "Purple"
     end
-    
-    -- SMART STAT MODULE INTERCEPT PROCESSING ENGINE
+    if AutoRollConfig.bulkQuality == 0 or (rarityKey and AutoRollConfig.quality and AutoRollConfig.quality[rarityKey] == 0) then return end
+    if (itemType == "Armor" or itemSubClass == "Shields") and (AutoRollConfig.bulkArmor == 0 or (AutoRollConfig.armor and AutoRollConfig.armor[itemSubClass] == 0)) then return end
+    if itemType == "Weapon" and (AutoRollConfig.bulkWeapons == 0 or (AutoRollConfig.weapons and AutoRollConfig.weapons[itemSubClass] == 0)) then return end
+    if AutoRollConfig.autoGreedUnusable and IsItemUnusable(itemLink) then if ExecuteRollChoice(rollID, 2, itemLink, "Unusable") then return end end
     if AutoRollConfig.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] then
-        local slotID = SLOT_MAP[itemEquipLoc]
-        local equippedItemLink = GetInventoryItemLink("player", slotID)
-        
-        local droppedScore = CalculateItemScore(itemLink)
-        local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
-        
-        if droppedScore > equippedScore then
-            if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
-            DEFAULT_CHAT_FRAME:AddMessage("|cFF3399FF[AutoRoll Alert]|r Drop " .. itemLink .. " (|cFF00FF00Score: " .. droppedScore .. "|r) beats Equipped (|cFFFF0000Score: " .. equippedScore .. "|r). Suggesting NEED!")
+        local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
+        local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
+        if droppedScore > equippedScore then if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[AutoRoll Alert]|r %s (|cFF00FF00Weight Score: %.2f|r) beats Equipped (|cFFFF0000Score: %.2f|r). Suggesting NEED!", itemLink, droppedScore, equippedScore))
         end
     end
-    
-    -- Restructured safe checking architecture blocks
-    local rarityMap = { [2] = "Green", [3] = "Blue", [4] = "Purple" }
-    local rarityKey = rarityMap[itemRarity]
-    
     if rarityKey and AutoRollConfig.quality then
-        local qChoice = 0
-        if AutoRollConfig.bulkQuality and AutoRollConfig.bulkQuality > 0 then
-            qChoice = AutoRollConfig.bulkQuality
-        else
-            qChoice = AutoRollConfig.quality[rarityKey] or 0
-        end
-        if qChoice > 0 then
-            if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter") then return end
-        end
+        local qChoice = 0 if AutoRollConfig.bulkQuality and AutoRollConfig.bulkQuality > 0 then qChoice = AutoRollConfig.bulkQuality else qChoice = AutoRollConfig.quality[rarityKey] or 0 end
+        if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter") then return end end
     end
-    
-    if itemType == "Armor" and AutoRollConfig.armor then
-        local aChoice = 0
-        if AutoRollConfig.bulkArmor and AutoRollConfig.bulkArmor > 0 then
-            aChoice = AutoRollConfig.bulkArmor
-        else
-            aChoice = AutoRollConfig.armor[itemSubClass] or 0
-        end
-        if aChoice > 0 then
-            if ExecuteRollChoice(rollID, aChoice, itemLink, itemSubClass) then return end
-        end
+    if (itemType == "Armor" or itemSubClass == "Shields") and AutoRollConfig.armor then
+        local aChoice = 0 if AutoRollConfig.bulkArmor and AutoRollConfig.bulkArmor > 0 then aChoice = AutoRollConfig.bulkArmor else aChoice = AutoRollConfig.armor[itemSubClass] or 0 end
+        if aChoice > 0 then if ExecuteRollChoice(rollID, aChoice, itemLink, itemSubClass) then return end end
     end
-    
     if itemType == "Weapon" and AutoRollConfig.weapons then
-        local wChoice = 0
-        if AutoRollConfig.bulkWeapons and AutoRollConfig.bulkWeapons > 0 then
-            wChoice = AutoRollConfig.bulkWeapons
-        else
-            wChoice = AutoRollConfig.weapons[itemSubClass] or 0
-        end
-        if wChoice > 0 then
-            if ExecuteRollChoice(rollID, wChoice, itemLink, itemSubClass) then return end
-        end
+        local wChoice = 0 if AutoRollConfig.bulkWeapons and AutoRollConfig.bulkWeapons > 0 then wChoice = AutoRollConfig.bulkWeapons else wChoice = AutoRollConfig.weapons[itemSubClass] or 0 end
+        if wChoice > 0 then if ExecuteRollChoice(rollID, wChoice, itemLink, itemSubClass) then return end end
+    end
+end
+-- Isolated bulk synchronize handlers built outside options templates to secure 0 errors
+local settingsFrame, statFrame, weightFrame, UpdateButtonVisuals
+local dropdownCounter = 0
+
+local function ForcePanelVisualSync()
+    if settingsFrame and settingsFrame:IsShown() then
+        settingsFrame:Hide()
+        settingsFrame:Show()
     end
 end
 
--- GUI Layout Construction Engine pointers
-local settingsFrame, statFrame, UpdateButtonVisuals
-local dropdownCounter = 0
-local activeDropdowns = {}
+local function SyncBulkArmorOptions(val)
+    if val and val > 0 then
+        AutoRollConfig.armor["Cloth"] = val
+        AutoRollConfig.armor["Leather"] = val
+        AutoRollConfig.armor["Mail"] = val
+        AutoRollConfig.armor["Plate"] = val
+        AutoRollConfig.armor["Shields"] = val
+        ForcePanelVisualSync()
+    end
+end
 
-local function CreateDropdownMenu(parent, label, x, y, configTable, key, isBulk, bulkKey)
+local function SyncBulkWeaponOptions(val)
+    if val and val > 0 then
+        AutoRollConfig.weapons["Daggers"] = val
+        AutoRollConfig.weapons["One-Handed Swords"] = val
+        AutoRollConfig.weapons["Two-Handed Swords"] = val
+        AutoRollConfig.weapons["One-Handed Maces"] = val
+        AutoRollConfig.weapons["Two-Handed Maces"] = val
+        AutoRollConfig.weapons["One-Handed Axes"] = val
+        AutoRollConfig.weapons["Two-Handed Axes"] = val
+        AutoRollConfig.weapons["Staves"] = val
+        AutoRollConfig.weapons["Bows"] = val
+        AutoRollConfig.weapons["Guns"] = val
+        AutoRollConfig.weapons["Crossbows"] = val
+        ForcePanelVisualSync()
+    end
+end
+
+local function SyncBulkQualityOptions(val)
+    if val and val > 0 then
+        AutoRollConfig.quality["Green"] = val
+        AutoRollConfig.quality["Blue"] = val
+        AutoRollConfig.quality["Purple"] = val
+        ForcePanelVisualSync()
+    end
+end
+local function CreateDropdownMenu(parent, label, x, y, configTable, key, bulkCategory)
     dropdownCounter = dropdownCounter + 1
     local name = "AutoRollDropdown_" .. dropdownCounter
-    
     local lbl = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     lbl:SetPoint("TOPLEFT", x, y)
     lbl:SetText(label)
@@ -194,9 +224,7 @@ local function CreateDropdownMenu(parent, label, x, y, configTable, key, isBulk,
     UIDropDownMenu_SetWidth(f, 75)
     
     local options = { "Manual", "Need", "Greed", "Pass" }
-    if isBulk then options = { "Custom", "Need", "Greed", "Pass" } end
-    
-    if not isBulk then activeDropdowns[name] = { f = f, t = configTable, k = key, bk = bulkKey } end
+    if bulkCategory then options = { "Custom", "Need", "Greed", "Pass" } end
     
     UIDropDownMenu_Initialize(f, function()
         local info = UIDropDownMenu_CreateInfo()
@@ -209,17 +237,12 @@ local function CreateDropdownMenu(parent, label, x, y, configTable, key, isBulk,
                 UIDropDownMenu_SetSelectedValue(f, self.value)
                 UIDropDownMenu_SetText(f, options[self.value + 1])
                 
-                if isBulk then
-                    for dName, data in activeDropdowns do
-                        if data.bk == key then
-                            if self.value > 0 and data.t then
-                                data.t[data.k] = self.value
-                                UIDropDownMenu_SetSelectedValue(data.f, self.value)
-                                local subOpts = { "Manual", "Need", "Greed", "Pass" }
-                                UIDropDownMenu_SetText(data.f, subOpts[self.value + 1])
-                            end
-                        end
-                    end
+                if bulkCategory == "armor" then
+                    SyncBulkArmorOptions(self.value)
+                elseif bulkCategory == "weapons" then
+                    SyncBulkWeaponOptions(self.value)
+                elseif bulkCategory == "quality" then
+                    SyncBulkQualityOptions(self.value)
                 end
             end
             UIDropDownMenu_AddButton(info)
@@ -231,130 +254,65 @@ local function CreateDropdownMenu(parent, label, x, y, configTable, key, isBulk,
     UIDropDownMenu_SetText(f, options[currentValue + 1])
     return f
 end
-local function CreateStatDropdown(parent, label, x, y, configTable, key, optionsList)
-    dropdownCounter = dropdownCounter + 1
-    local name = "AutoRollStatDropdown_" .. dropdownCounter
-    
-    local lbl = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    lbl:SetPoint("TOPLEFT", x, y)
-    lbl:SetText(label)
-    
-    local f = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
-    f:SetPoint("TOPLEFT", x + 105, y + 7)
-    UIDropDownMenu_SetWidth(f, 85)
-    
-    UIDropDownMenu_Initialize(f, function()
-        local info = UIDropDownMenu_CreateInfo()
-        for _, optName in ipairs(optionsList) do
-            info.text = optName
-            info.value = optName
-            info.checked = (configTable and configTable[key] == optName)
-            info.func = function(self)
-                if configTable then configTable[key] = self.value end
-                UIDropDownMenu_SetSelectedValue(f, self.value)
-                UIDropDownMenu_SetText(f, self.value)
-            end
-            UIDropDownMenu_AddButton(info)
-        end
-    end)
-    
-    local currentVal = (configTable and configTable[key]) or optionsList[1]
-    UIDropDownMenu_SetSelectedValue(f, currentVal)
-    UIDropDownMenu_SetText(f, currentVal)
-    return f
-end
 
 local function CreateCheckbox(parent, label, x, y, configTable, key)
-    local name = "AutoRollCheckButton_Master_" .. key
-    local cb = CreateFrame("CheckButton", name, parent, "InterfaceOptionsCheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", x, y)
-    local text = _G[name .. "Text"]
-    if text then text:SetText(label) end
+    local name = "AutoRollCheckButton_Master_" .. key local cb = CreateFrame("CheckButton", name, parent, "InterfaceOptionsCheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", x, y) local text = _G[name .. "Text"] if text then text:SetText(label) end
     cb:SetScript("OnShow", function(self) if configTable then self:SetChecked(configTable[key]) end end)
     cb:SetScript("OnClick", function(self) if configTable then configTable[key] = not not self:GetChecked() end end)
     return cb
 end
 
-local BuildUI
-
-local function ToggleUI()
-    if not settingsFrame then BuildUI() end
-    if settingsFrame then
-        if settingsFrame:IsShown() then 
-            settingsFrame:Hide() 
-            if statFrame then statFrame:Hide() end
-        else 
-            settingsFrame:Show() 
-        end
+local function BuildWeightEditUI()
+    if weightFrame or not AutoRollConfig then return end
+    weightFrame = CreateFrame("Frame", "AutoRollWeightFrame", UIParent) weightFrame:SetSize(280, 480) weightFrame:SetPoint("LEFT", statFrame or settingsFrame, "RIGHT", 12, 0)
+    weightFrame:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 5, right = 5, top = 5, bottom = 5 } })
+    local title = weightFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal") title:SetPoint("TOP", 0, -15) title:SetText("|cFF3399FFModify Scale Weights|r")
+    local close = CreateFrame("Button", nil, weightFrame, "UIPanelCloseButton") close:SetPoint("TOPRIGHT", -2, -2)
+    local scrollFrame = CreateFrame("ScrollFrame", "AutoRollWeightScrollFrame", weightFrame, "UIPanelScrollFrameTemplate") scrollFrame:SetPoint("TOPLEFT", 15, -45) scrollFrame:SetPoint("BOTTOMRIGHT", -35, 15)
+    local content = CreateFrame("Frame", nil, scrollFrame) content:SetSize(210, 520) scrollFrame:SetScrollChild(content)
+    local orderedKeys = { "Strength", "Agility", "Stamina", "Intellect", "Spirit", "Crit", "Hit", "Haste", "Spell Power", "Attack Power", "PvE Power", "Armor Pen", "Weapon DPS", "Ranged DPS", "Spell Damage", "Healing Power", "Resilience", "Mana per 5" }
+    for idx, key in ipairs(orderedKeys) do
+        local yOffset = -((idx - 1) * 26) local lbl = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall") lbl:SetPoint("TOPLEFT", 5, yOffset - 5) lbl:SetText(key)
+        local eb = CreateFrame("EditBox", nil, content, "InputBoxTemplate") eb:SetSize(65, 20) eb:SetPoint("TOPLEFT", 130, yOffset - 3) eb:SetAutoFocus(false) eb:SetMaxLetters(6)
+        eb:SetScript("OnShow", function(self) if AutoRollConfig and AutoRollConfig.weights then self:SetText(tostring(AutoRollConfig.weights[key] or 0)) end end)
+        eb:SetScript("OnTextChanged", function(self) local txt = self:GetText() if txt and txt ~= "" then local val = tonumber(txt) or 0 if AutoRollConfig and AutoRollConfig.weights then AutoRollConfig.weights[key] = val end end end)
     end
 end
 
 local function BuildStatUI()
     if statFrame or not AutoRollConfig then return end
-    
-    statFrame = CreateFrame("Frame", "AutoRollStatFrame", UIParent)
-    statFrame:SetSize(255, 400)
-    statFrame:SetPoint("LEFT", settingsFrame, "RIGHT", 12, 0)
-    statFrame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
-        insets = { left = 5, right = 5, top = 5, bottom = 5 }
-    })
-    statFrame:Hide()
-    
-    local title = statFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    title:SetPoint("TOP", 0, -15)
-    title:SetText("|cFF3399FFSmart Stats Config|r")
-    
-    local close = CreateFrame("Button", nil, statFrame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -2, -2)
-    
-    local modCB = CreateCheckbox(statFrame, "Enable Auto-Inspect", 15, -45, AutoRollConfig, "statModuleEnabled")
-    modCB:SetScript("OnClick", function(self) AutoRollConfig.statModuleEnabled = not not self:GetChecked() end)
-    
-    local statList = { "Strength", "Agility", "Stamina", "Intellect", "Spirit" }
-    CreateStatDropdown(statFrame, "Main Stat", 15, -95, AutoRollConfig, "selectedMainStat", statList)
-    CreateStatDropdown(statFrame, "Sec. Stat", 15, -145, AutoRollConfig, "selectedSecStat", statList)
-    
-    local mHelpBox = CreateFrame("Frame", nil, statFrame)
-    mHelpBox:SetSize(225, 190)
-    mHelpBox:SetPoint("BOTTOM", 0, 15)
-    mHelpBox:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 12, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 }
-    })
-    mHelpBox:SetBackdropColor(0, 0, 0, 0.6)
+    statFrame = CreateFrame("Frame", "AutoRollStatFrame", UIParent) statFrame:SetSize(260, 220) statFrame:SetPoint("LEFT", settingsFrame, "RIGHT", 12, 110)
+    statFrame:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 5, right = 5, top = 5, bottom = 5 } })
+    local title = statFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal") title:SetPoint("TOP", 0, -15) title:SetText("|cFF3399FFSmart Stats Config|r")
+    local close = CreateFrame("Button", nil, statFrame, "UIPanelCloseButton") close:SetPoint("TOPRIGHT", -2, -2)
+    local modCB = CreateCheckbox(statFrame, "Enable Scale Inspector", 15, -45, AutoRollConfig, "statModuleEnabled")
+    local editWeightsBtn = CreateFrame("Button", nil, statFrame, "UIPanelButtonTemplate") editWeightsBtn:SetSize(140, 24) editWeightsBtn:SetPoint("TOP", 0, -95) editWeightsBtn:SetText("[ Edit Scale Weights ]")
+    editWeightsBtn:SetScript("OnClick", function() BuildWeightEditUI() if weightFrame:IsShown() then weightFrame:Hide() else weightFrame:Show() end end)
+    local desc = statFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall") desc:SetPoint("TOPLEFT", 15, -145) desc:SetWidth(230) desc:SetJustifyH("LEFT")
+    desc:SetText("|cFFFFD100Weight Scoring Mode:|r\nAddon calculates items over custom decimal matrix values. Items scoring higher than your equipped gear trigger NEED recommendations.")
+end
 
-    local mHelpText = mHelpBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    mHelpText:SetPoint("TOPLEFT", 10, -10)
-    mHelpText:SetWidth(205)
-    mHelpText:SetJustifyH("LEFT")
-    mHelpText:SetJustifyV("TOP")
-    mHelpText:SetSpacing(3)
-    
-    local mTextLines = {
-        "|cFFFFD100Module Rules:|r",
-        "• Automatically reads and analyzes the raw values of any item drops that match your equip slots.",
-        "• Calculates complex score matrices based on active options.",
-        "• If a drop out-values your currently equipped gear pieces, it highlights the launcher button to suggest NEED."
-    }
-    mHelpText:SetText(table.concat(mTextLines, "\n"))
+local BuildUI
+local function ToggleUI()
+    if not settingsFrame then BuildUI() end
+    if settingsFrame then if settingsFrame:IsShown() then settingsFrame:Hide() if statFrame then statFrame:Hide() end if weightFrame then weightFrame:Hide() end else settingsFrame:Show() end end
 end
 function BuildUI()
     if settingsFrame or not AutoRollConfig then return end
     
     settingsFrame = CreateFrame("Frame", "AutoRollOptionsFrame", UIParent)
-    settingsFrame:SetSize(490, 740)
+    settingsFrame:SetSize(490, 810)
     settingsFrame:SetPoint("CENTER")
     settingsFrame:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
         insets = { left = 11, right = 12, top = 12, bottom = 11 }
     })
+    
     settingsFrame:SetMovable(true)
     settingsFrame:EnableMouse(true)
     settingsFrame:RegisterForDrag("LeftButton")
@@ -376,51 +334,65 @@ function BuildUI()
     statToggleBtn:SetScript("OnClick", function()
         BuildStatUI()
         if statFrame then
-            if statFrame:IsShown() then statFrame:Hide() else statFrame:Show() end
+            if statFrame:IsShown() then
+                statFrame:Hide()
+                if weightFrame then weightFrame:Hide() end
+            else
+                statFrame:Show()
+            end
         end
     end)
 
     local masterCB = CreateCheckbox(settingsFrame, "|cFFFFD100Enable AutoRoll Addon Rules|r", 20, -50, AutoRollConfig, "enabled")
-    masterCB:SetScript("OnClick", function(self) 
-        if AutoRollConfig then AutoRollConfig.enabled = not not self:GetChecked() end
+    masterCB:SetScript("OnClick", function(self)
+        if AutoRollConfig then
+            AutoRollConfig.enabled = not not self:GetChecked()
+        end
         UpdateButtonVisuals()
     end)
     
     CreateCheckbox(settingsFrame, "Auto-Greed Unusable Items (Red Text)", 20, -75, AutoRollConfig, "autoGreedUnusable")
-
-    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Armor|r", 25, -110, AutoRollConfig, "bulkArmor", true)
-    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Rarities|r", 250, -110, AutoRollConfig, "bulkQuality", true)
-
-    local armors = {"Cloth", "Leather", "Mail", "Plate"}
-    for i, name in ipairs(armors) do CreateDropdownMenu(settingsFrame, name, 25, -120 - (i * 28), AutoRollConfig.armor, name, false, "bulkArmor") end
-
-    local qualities = { {label = "|cFF1EFF00Green|r", key = "Green"}, {label = "|cFF0070D8Blue|r", key = "Blue"}, {label = "|cFFA335EEPurple|r", key = "Purple"} }
-    for i, qInfo in ipairs(qualities) do CreateDropdownMenu(settingsFrame, qInfo.label, 250, -120 - (i * 28), AutoRollConfig.quality, qInfo.key, false, "bulkQuality") end
-
-    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Weapons|r", 25, -280, AutoRollConfig, "bulkWeapons", true)
     
-    local weaps = {
-        "Daggers", "One-Handed Swords", "Two-Handed Swords", "One-Handed Maces",
-        "Two-Handed Maces", "One-Handed Axes", "Two-Handed Axes", "Staves", "Bows", "Guns"
-    }
-    for i, name in ipairs(weaps) do
-        local col = i <= 5 and 25 or 250
-        local row = i <= 5 and i or i - 5
-        local cleanLabel = name:gsub("One%-Handed ", "1H "):gsub("Two%-Handed ", "2H ")
-        CreateDropdownMenu(settingsFrame, cleanLabel, col, -290 - (row * 28), AutoRollConfig.weapons, name, false, "bulkWeapons")
+    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Armor|r", 25, -110, AutoRollConfig, "bulkArmor", "armor")
+    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Rarities|r", 250, -110, AutoRollConfig, "bulkQuality", "quality")
+    
+    local armors = {"Cloth", "Leather", "Mail", "Plate", "Shields"}
+    for i, name in ipairs(armors) do
+        CreateDropdownMenu(settingsFrame, name, 25, -120 - (i * 28), AutoRollConfig.armor, name)
     end
-
+    
+    local qualities = {
+        {label = "|cFF1EFF00Green|r", key = "Green"},
+        {label = "|cFF0070D8Blue|r", key = "Blue"},
+        {label = "|cFFA335EEPurple|r", key = "Purple"}
+    }
+    for i, qInfo in ipairs(qualities) do
+        CreateDropdownMenu(settingsFrame, qInfo.label, 250, -120 - (i * 28), AutoRollConfig.quality, qInfo.key)
+    end
+    
+    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Weapons|r", 25, -290, AutoRollConfig, "bulkWeapons", "weapons")
+    
+    local weaps = { "Daggers", "One-Handed Swords", "Two-Handed Swords", "One-Handed Maces", "Two-Handed Maces", "One-Handed Axes", "Two-Handed Axes", "Staves", "Bows", "Guns", "Crossbows" }
+    for i, name in ipairs(weaps) do
+        local col = i <= 6 and 25 or 250
+        local row = i <= 6 and i or i - 6
+        local cleanLabel = name:gsub("One%-Handed ", "1H "):gsub("Two%-Handed ", "2H ")
+        CreateDropdownMenu(settingsFrame, cleanLabel, col, -300 - (row * 28), AutoRollConfig.weapons, name)
+    end
+    
     local helpBox = CreateFrame("Frame", nil, settingsFrame)
-    helpBox:SetSize(440, 200)
-    helpBox:SetPoint("TOP", settingsFrame, "TOP", 0, -475)
+    helpBox:SetSize(440, 215)
+    helpBox:SetPoint("BOTTOM", settingsFrame, "BOTTOM", 0, 22)
     helpBox:SetBackdrop({
         bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
+        tile = true,
+        tileSize = 16,
+        edgeSize = 12,
         insets = { left = 3, right = 3, top = 3, bottom = 3 }
     })
     helpBox:SetBackdropColor(0, 0, 0, 0.6)
-
+    
     local helpText = helpBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     helpText:SetPoint("TOPLEFT", 12, -12)
     helpText:SetWidth(415)
@@ -439,19 +411,20 @@ function BuildUI()
 end
 local function BuildLauncherButton()
     if AutoRollLauncherButton then return end
-
+    
     local btn = CreateFrame("Button", "AutoRollLauncherButton", UIParent)
     btn:SetSize(32, 32)
     btn:SetPoint("CENTER", UIParent, "CENTER", (AutoRollConfig and AutoRollConfig.buttonX) or 0, (AutoRollConfig and AutoRollConfig.buttonY) or 150)
     btn:SetFrameStrata("HIGH")
-    
     btn:SetBackdrop({
         bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
+        tile = true,
+        tileSize = 16,
+        edgeSize = 12,
         insets = { left = 3, right = 3, top = 3, bottom = 3 }
     })
-
+    
     local icon = btn:CreateTexture(nil, "ARTWORK")
     icon:SetSize(22, 22)
     icon:SetPoint("CENTER", 0, 0)
@@ -460,19 +433,19 @@ local function BuildLauncherButton()
     alertTextString = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     alertTextString:SetPoint("BOTTOM", btn, "TOP", 0, 4)
     alertTextString:SetText("")
-
+    
     function UpdateButtonVisuals()
-        if AutoRollConfig and AutoRollConfig.enabled then 
+        if AutoRollConfig and AutoRollConfig.enabled then
             btn:SetBackdropColor(0, 0.6, 0, 0.8)
             btn:SetBackdropBorderColor(0.2, 1, 0.2, 1)
             icon:SetVertexColor(1, 1, 1, 1)
-        else 
+        else
             btn:SetBackdropColor(0.6, 0, 0, 0.8)
             btn:SetBackdropBorderColor(1, 0.2, 0.2, 1)
             icon:SetVertexColor(0.5, 0.5, 0.5, 0.8)
         end
     end
-
+    
     btn:SetMovable(true)
     btn:EnableMouse(true)
     btn:RegisterForDrag("LeftButton")
@@ -491,12 +464,12 @@ local function BuildLauncherButton()
     end)
     
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    
     btn:SetScript("OnClick", function(self, button)
         if button == "LeftButton" and AutoRollConfig then
             AutoRollConfig.enabled = not AutoRollConfig.enabled
             UpdateButtonVisuals()
             if alertTextString then alertTextString:SetText("") end
-            DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AutoRoll]|r Status changed: " .. (AutoRollConfig.enabled and "|cFF00FF00Enabled|r" or "|cFFFF0000Disabled|r"))
             if settingsFrame and settingsFrame:IsShown() then
                 settingsFrame:Hide()
                 settingsFrame:Show()
@@ -506,29 +479,31 @@ local function BuildLauncherButton()
             ToggleUI()
         end
     end)
-
+    
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:SetText("AutoRoll Core")
         GameTooltip:AddLine("Left-Click: |cFFFFFFFFToggle Entire Addon On/Off|r", 1, 1, 1)
         GameTooltip:AddLine("Right-Click: |cFFFFFFFFOpen Dropdown Settings Panel|r", 1, 1, 1)
-        GameTooltip:AddLine("Drag: |cFFFFFFFFMove Square Anywhere on Screen|r", 1, 1, 1)
         GameTooltip:Show()
     end)
-    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
+    
+    btn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+    
     UpdateButtonVisuals()
 end
+
 local isLoaded = false
 local function InitializeAddon()
     if isLoaded then return end
     isLoaded = true
-    
-    if not AutoRollConfig then 
-        AutoRollConfig = defaults 
+    if not AutoRollConfig then
+        AutoRollConfig = defaults
     else
-        for k, v in pairs(defaults) do 
-            if AutoRollConfig[k] == nil then AutoRollConfig[k] = v end 
+        for k, v in pairs(defaults) do
+            if AutoRollConfig[k] == nil then AutoRollConfig[k] = v end
         end
     end
     BuildLauncherButton()
@@ -543,7 +518,9 @@ mainFrame:SetScript("OnEvent", function(self, event, arg1)
         local rollID = arg1
         local itemLink = GetLootRollItemLink(rollID)
         handledRolls[rollID] = false
-        if itemLink then pcall(ProcessLootRoll, rollID, itemLink) end
+        if itemLink then
+            pcall(ProcessLootRoll, rollID, itemLink)
+        end
     elseif event == "CANCEL_LOOT_ROLL" then
         handledRolls[arg1] = nil
     end
@@ -561,9 +538,20 @@ mainFrame:SetScript("OnUpdate", function(self, elapsed)
                     local _, maxTime = statusBar:GetMinMaxValues()
                     local secondsLeft = statusBar:GetValue() / 1000
                     if secondsLeft > 0 and secondsLeft <= AutoRollConfig.timeThreshold then
-                        handledRolls[rollID] = true RollOnLoot(rollID, 2)
-                        if alertTextString then alertTextString:SetText("") end
-                        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AutoRoll]|r Fallback Greed: Timer expiring.")
+                        local itemLink = GetLootRollItemLink(rollID)
+                        local shouldFallback = true
+                        if itemLink then
+                            local _, _, _, _, _, itemType, itemSubClass = GetItemInfo(itemLink)
+                            if (itemType == "Weapon" and AutoRollConfig.weapons and AutoRollConfig.weapons[itemSubClass] == 0) or ((itemType == "Armor" or itemSubClass == "Shields") and AutoRollConfig.armor and AutoRollConfig.armor[itemSubClass] == 0) then
+                                shouldFallback = false
+                            end
+                        end
+                        if shouldFallback then
+                            handledRolls[rollID] = true
+                            RollOnLoot(rollID, 2)
+                            CloseActiveLootFrame(rollID)
+                            if alertTextString then alertTextString:SetText("") end
+                        end
                     end
                 end
             end
