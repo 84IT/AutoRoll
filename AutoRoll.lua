@@ -1,3 +1,11 @@
+
+-- Forward declarations to prevent top-to-bottom variable loading sequence crashes
+local GetPlayerClassProfile
+local CalculateItemScore
+local scannerTooltip
+
+
+
 -- Global array table holding current edits during typing sessions
 local tempWeights = {}
 
@@ -40,28 +48,76 @@ local defaults = {
 }
 
 -- Mapping database translating tooltip string text matching rules to database indices
+-- Fortified pattern table corrected with single-escape matching rules for literal plus sign lines
 local STAT_PATTERNS = {
-    { key = "Strength",     pats = { "%+(%d+) Strength", "%+(%d+) strength" } },
-    { key = "Agility",      pats = { "%+(%d+) Agility", "%+(%d+) agility" } },
-    { key = "Stamina",      pats = { "%+(%d+) Stamina", "%+(%d+) stamina" } },
-    { key = "Intellect",    pats = { "%+(%d+) Intellect", "%+(%d+) intellect" } },
-    { key = "Spirit",       pats = { "%+(%d+) Spirit", "%+(%d+) spirit" } },
-    { key = "Crit",         pats = { "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)", "critical strike rating by (%d+)" } },
-    { key = "Hit",          pats = { "hit rating", "Hit Rating", "Improves hit rating by (%d+)", "hit rating by (%d+)" } },
-    { key = "Haste",        pats = { "haste rating", "Haste Rating", "Improves haste rating by (%d+)", "haste rating by (%d+)" } },
-    { key = "Attack Power", pats = { "attack power", "Attack Power", "Increases attack power by (%d+)" } },
-    { key = "Spell Power",  pats = { "spell power", "Spell Power", "Increases spell power by (%d+)" } },
-    { key = "Spell Damage", pats = { "Increases spell damage by (%d+)" } },
-    { key = "Armor Pen",    pats = { "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)", "armor penetration rating by (%d+)" } },
-    { key = "Spell Pen",    pats = { "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)", "spell penetration by (%d+)" } },
-    { key = "Expertise",    pats = { "expertise rating", "Expertise", "Improves expertise rating by (%d+)", "expertise rating by (%d+)" } },
+    { key = "Strength",     pats = { "%+(%d+)%s*Strength", "%+(%d+)%s*strength" } },
+    { key = "Agility",      pats = { "%+(%d+)%s*Agility", "%+(%d+)%s*agility" } },
+    { key = "Stamina",      pats = { "%+(%d+)%s*Stamina", "%+(%d+)%s*stamina" } },
+    { key = "Intellect",    pats = { "%+(%d+)%s*Intellect", "%+(%d+)%s*intellect" } },
+    { key = "Spirit",       pats = { "%+(%d+)%s*Spirit", "%+(%d+)%s*spirit" } },
+    
+    { key = "Crit",         pats = { "critical strike rating by (%d+)", "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)" } },
+    { key = "Hit",          pats = { "hit rating by (%d+)", "hit rating", "Hit Rating", "Improves hit rating by (%d+)" } },
+    { key = "Haste",        pats = { "haste rating by (%d+)", "haste rating", "Haste Rating", "Improves haste rating by (%d+)" } },
+    
+    { key = "Ranged Attack Power", pats = { "ranged attack power by (%d+)", "Ranged Attack Power", "ranged attack power" } },
+    { key = "Attack Power", pats = { "attack power by (%d+)", "%+(%d+)%s*Attack Power", "Attack Power" } },
+    { key = "Spell Power",  pats = { "spell power by (%d+)", "spell power", "Spell Power", "Increases spell power by (%d+)" } },
+    { key = "Spell Damage", pats = { "spell damage by (%d+)", "Increases spell damage by (%d+)" } },
+    
+    { key = "Armor Pen",    pats = { "armor penetration rating by (%d+)", "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)" } },
+    { key = "Spell Pen",    pats = { "spell penetration by (%d+)", "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)" } },
+    { key = "Expertise",    pats = { "expertise rating by (%d+)", "expertise rating", "Expertise", "Improves expertise rating by (%d+)" } },
     { key = "Weapon DPS",   pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
     { key = "Ranged DPS",   pats = { "Ranged.*((%d+%.?%d*)) damage per second" } },
-    { key = "Resilience",   pats = { "resilience rating", "Resilience", "resilience rating by (%d+)" } },
+    { key = "Resilience",   pats = { "resilience rating by (%d+)", "resilience rating", "Resilience" } },
     { key = "Mana per 5",   pats = { "mana per 5 sec", "Restores (%d+) mana per 5", "mana per 5 seconds" } }
 }
 
-local scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
+
+
+
+function CalculateItemScore(itemLink)
+    local playerClass = GetPlayerClassProfile()
+    if not itemLink or not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then 
+        return 0 
+    end
+    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scannerTooltip:ClearLines()
+    scannerTooltip:SetHyperlink(itemLink)
+    local totalScore = 0
+    for i = 1, scannerTooltip:NumLines() do
+        local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+        if leftLine then
+            local text = leftLine:GetText()
+            if text then
+                -- Set Bonus Shield: Skips line immediately if it contains set piece bonus markers
+                if string.find(text, "Set:") or string.find(text, "%(%d+%)%s*Set") then
+                    -- Skips straight to the next line without running text pattern matches
+                else
+                    for _, item in ipairs(STAT_PATTERNS) do
+                        local weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
+                        if weight > 0 then
+                            for _, pattern in ipairs(item.pats) do
+                                local match = string.match(text, pattern)
+                                if match then 
+                                    totalScore = totalScore + (tonumber(match) * weight) 
+                                    break 
+                                end
+                            end
+                        end
+                    end
+                end -- End of Set Shield check
+            end
+        end
+    end
+
+    scannerTooltip:Hide()
+    return totalScore
+end
+
+
+scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
 
 local function IsItemUnusable(itemLink)
     if not itemLink then return false end
@@ -80,7 +136,7 @@ local function IsItemUnusable(itemLink)
     return unusable
 end
 
-local function GetPlayerClassProfile()
+function GetPlayerClassProfile()
     local localClassName, _ = UnitClass("player")
     if not localClassName or localClassName == "" then return "Unknown" end
     if localClassName == "Knight Of Xoroth" then localClassName = "Knight of Xoroth" end
@@ -122,52 +178,6 @@ mainFrame:RegisterEvent("ADDON_LOADED")
 mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("START_LOOT_ROLL")
 mainFrame:RegisterEvent("CANCEL_LOOT_ROLL")
---Test code below
--- Global Tooltip Hook for Ondemand Diagnostic Scans
-GameTooltip:HookScript("OnTooltipSetItem", function(self)
-    -- Only runs if you are holding down the Left or Right Control key to prevent chat spam
-    if IsControlKeyDown() then
-        local _, itemLink = self:GetItem()
-        if not itemLink then return end
-        
-        local itemName = GetItemInfo(itemLink)
-        if not itemName then return end
-        
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
-        
-        local totalScore = 0
-        -- Scan every visible line inside your active tooltip container
-        for i = 1, self:NumLines() do
-            local leftLine = _G[self:GetName() .. "TextLeft" .. i]
-            if leftLine then
-                local text = leftLine:GetText()
-                if text then
-                    local lineMatched = false
-                    for _, item in ipairs(STAT_PATTERNS) do
-                        local weight = (AutoRollConfig and AutoRollConfig.weights and AutoRollConfig.weights[item.key]) or 0
-                        for _, pattern in ipairs(item.pats) do
-                            local match = string.match(text, pattern)
-                            if match then
-                                local value = tonumber(match) or 0
-                                local lineScore = value * weight
-                                totalScore = totalScore + lineScore
-                                lineMatched = true
-                                DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
-                                break
-                            end
-                        end
-                        if lineMatched then break end
-                    end
-                    -- If a line has stats but our patterns missed it completely, print it as unmapped text
-                    if not lineMatched and (string.find(text, "%+%d+") or string.find(text, "rating") or string.find(text, "per second")) then
-                        DEFAULT_CHAT_FRAME:AddMessage("  |cFFFF0000[UNMAPPED LINE]:|r \"" .. text .. "\"")
-                    end
-                end
-            end
-        end
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00Final Calculated Total Score:|r |cFFFFFFFF%.2f|r", totalScore))
-    end
-end)
 
 
 
@@ -194,14 +204,33 @@ local function ExecuteRollChoice(rollID, choiceCode, itemLink, reason)
     return false
 end
 
+-- Cross-referenced inventory tracking map updated with custom server text label overrides
 local SLOT_MAP = {
-    ["INVTYPE_HEAD"] = 1, ["INVTYPE_NECK"] = 2, ["INVTYPE_SHOULDER"] = 3, ["INVTYPE_BODY"] = 4,
-    ["INVTYPE_CHEST"] = 5, ["INVTYPE_ROBE"] = 5, ["INVTYPE_WAIST"] = 6, ["INVTYPE_LEGS"] = 7,
-    ["INVTYPE_FEET"] = 8, ["INVTYPE_WRIST"] = 9, ["INVTYPE_HANDS"] = 10, ["INVTYPE_FINGER"] = 11,
-    ["INVTYPE_TRINKET"] = 12, ["INVTYPE_CLOAK"] = 15, ["INVTYPE_WEAPON"] = 16, ["INVTYPE_SHIELD"] = 17,
-    ["INVTYPE_RANGED"] = 18, ["INVTYPE_2HWEAPON"] = 16, ["INVTYPE_WEAPONMAINHAND"] = 16,
-    ["INVTYPE_WEAPONOFFHAND"] = 17, ["INVTYPE_HOLDABLE"] = 17, ["INVTYPE_RANGEDRIGHT"] = 18
+    ["INVTYPE_HEAD"] = 1,      ["Head"] = 1,
+    ["INVTYPE_NECK"] = 2,      ["Neck"] = 2,
+    ["INVTYPE_SHOULDER"] = 3,  ["Shoulder"] = 3, ["Shoulders"] = 3,
+    ["INVTYPE_BODY"] = 4,      ["Shirt"] = 4,
+    ["INVTYPE_CHEST"] = 5,     ["Chest"] = 5,    ["Robe"] = 5, ["INVTYPE_ROBE"] = 5,
+    ["INVTYPE_WAIST"] = 6,     ["Waist"] = 6,    ["Belt"] = 6,
+    ["INVTYPE_LEGS"] = 7,      ["Legs"] = 7,
+    ["INVTYPE_FEET"] = 8,      ["Feet"] = 8,     ["Boots"] = 8,
+    ["INVTYPE_WRIST"] = 9,     ["Wrist"] = 9,    ["Bracers"] = 9,
+    ["INVTYPE_HANDS"] = 10,    ["Hands"] = 10,   ["Gloves"] = 10, ["Gauntlets"] = 10,
+    ["INVTYPE_FINGER"] = 11,   ["Finger"] = 11,  ["Ring"] = 11,
+    ["INVTYPE_TRINKET"] = 12,  ["Trinket"] = 12,
+    ["INVTYPE_CLOAK"] = 15,    ["Back"] = 15,    ["Cloak"] = 15,
+    
+    ["INVTYPE_WEAPON"] = 16,   ["One-Hand"] = 16, ["One-Handed"] = 16,
+    ["INVTYPE_2HWEAPON"] = 16, ["Two-Hand"] = 16, ["Two-Handed"] = 16,
+    ["INVTYPE_WEAPONMAINHAND"] = 16, ["Main-Hand"] = 16, ["Main Hand"] = 16,
+    
+    ["INVTYPE_SHIELD"] = 17,   ["Shield"] = 17,
+    ["INVTYPE_WEAPONOFFHAND"] = 17,  ["Off-Hand"] = 17, ["Off Hand"] = 17,
+    ["INVTYPE_HOLDABLE"] = 17, ["Held In Off-Hand"] = 17, ["Held in Off-Hand"] = 17,
+    
+    ["INVTYPE_RANGED"] = 18,   ["Ranged"] = 18,  ["INVTYPE_RANGEDRIGHT"] = 18
 }
+
 
 local alertTextString
 local function ProcessLootRoll(rollID, itemLink)
@@ -225,6 +254,16 @@ local function ProcessLootRoll(rollID, itemLink)
     if itemType == "Weapon" and (cCfg.bulkWeapons == 0 or (cCfg.weapons and cCfg.weapons[itemSubClass] == 0)) then return end
     if cCfg.autoGreedUnusable and IsItemUnusable(itemLink) then if ExecuteRollChoice(rollID, 2, itemLink, "Unusable") then return end end
     
+        -- Weapon Exception Override: Prevents automatic stat passes on alternative weapon combos
+    if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" then
+        local droppedScore = CalculateItemScore(itemLink)
+        if alertTextString then 
+            alertTextString:SetText("|cFFFFD100Weapon Dropped! Manual Choice Required|r") 
+        end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon combo piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore))
+        return -- Safely exits the function right here, leaving the roll window open for you!
+    end
+
     if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
         local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
         local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
@@ -726,3 +765,84 @@ mainFrame:SetScript("OnUpdate", function(self, elapsed)
 end)
 
 SLASH_AUTOROLL1 = "/autoroll" SlashCmdList["AUTOROLL"] = function() ToggleUI() end
+
+
+--Test code below
+-- Global Tooltip Hook for Ondemand Diagnostic Scans
+-- Fortified Global Tooltip Hook for On-Demand Slot Comparison Upgrades
+GameTooltip:HookScript("OnTooltipSetItem", function(self)
+    if IsControlKeyDown() then
+        local _, itemLink = self:GetItem()
+        if not itemLink then return end
+        
+        local itemName, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
+        if not itemName then return end
+        
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
+        
+        local playerClass = GetPlayerClassProfile()
+        
+                -- 1. Calculate the flat total score of the targeted inventory item
+        local totalDroppedScore = 0
+        for i = 1, self:NumLines() do
+            local leftLine = _G[self:GetName() .. "TextLeft" .. i]
+            if leftLine then
+                local text = leftLine:GetText()
+                if text then
+                    -- Set Bonus Shield: Bypasses line logging completely for set benchmarks
+                    if string.find(text, "Set:") or string.find(text, "%(%d+%)%s*Set") then
+                        -- Ignores text row
+                    else
+                        local lineMatched = false
+                        for _, item in ipairs(STAT_PATTERNS) do
+                            local weight = 0
+                            if AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
+                                weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
+                            end
+                            
+                            for _, pattern in ipairs(item.pats) do
+                                local match = string.match(text, pattern)
+                                if match then
+                                    local value = tonumber(match) or 0
+                                    local lineScore = value * weight
+                                    totalDroppedScore = totalDroppedScore + lineScore
+                                    lineMatched = true
+                                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
+                                    break
+                                end
+                            end
+                            if lineMatched then break end
+                        end
+                    end -- End of Set Shield check
+                end
+            end
+        end
+
+        
+        -- 2. Check for equipped item in that slot and calculate its comparison baseline score
+        local equippedScore = 0
+        local equippedItemLink = nil
+        if itemEquipLoc and SLOT_MAP[itemEquipLoc] then
+            local slotID = SLOT_MAP[itemEquipLoc]
+            equippedItemLink = GetInventoryItemLink("player", slotID)
+            if equippedItemLink then
+                equippedScore = CalculateItemScore(equippedItemLink)
+            end
+        end
+        
+        -- 3. Print the comprehensive dual-score mathematical evaluation to chat
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[Target Item Score]:|r %.2f", totalDroppedScore))
+        if equippedItemLink then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFF0000[Equipped Item Baseline]:|r %.2f (%s)", equippedScore, equippedItemLink))
+            local scoreDelta = totalDroppedScore - equippedScore
+            if scoreDelta > 0 then
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[STAT UPGRADE!]:|r This item is a +%.2f upgrade over equipped!", scoreDelta))
+            else
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFF2222[NO UPGRADE]:|r This item scores %.2f lower than equipped.", math.abs(scoreDelta)))
+            end
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cFF999999[Slot Baseline]:|r Empty slot. This item is an absolute upgrade!")
+        end
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r")
+    end
+end)
