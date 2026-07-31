@@ -1,7 +1,18 @@
 -- Global array table holding current edits during typing sessions
 local tempWeights = {}
 
--- Configuration Defaults Profile with added Stat Weight Matrices
+-- A clean, pre-compiled stat profile template used to safely spawn new classes
+local function GetBlankStatTable()
+    return {
+        ["Strength"] = 0, ["Agility"] = 0, ["Stamina"] = 0, ["Intellect"] = 0, ["Spirit"] = 0,
+        ["Crit"] = 0, ["Hit"] = 0, ["Haste"] = 0, ["Resilience"] = 0, ["Mana per 5"] = 0,
+        ["Weapon DPS"] = 0, ["Ranged DPS"] = 0, ["Attack Power"] = 0, ["Ranged Attack Power"] = 0, ["Spell Power"] = 0, 
+        ["Spell Damage"] = 0, ["Armor Pen"] = 0, ["Spell Pen"] = 0, ["Expertise"] = 0
+    }
+end
+
+
+-- Configuration Defaults Profile with integrated global Custom Class profile slots
 local defaults = {
     enabled = true,
     timeThreshold = 5,
@@ -19,20 +30,13 @@ local defaults = {
     },
     quality = { ["Green"] = 0, ["Blue"] = 0, ["Purple"] = 0 },
     
-    -- Smart Stat Module Global Switch
     statModuleEnabled = false,
     
-        -- Full Decimal Stat Weight Dictionary Table (Cleaned & Duplicate-Free)
-    weights = {
-        ["Strength"] = 0, ["Agility"] = 0, ["Stamina"] = 0, ["Intellect"] = 0, ["Spirit"] = 0,
-        ["Crit"] = 0, ["Hit"] = 0, ["Haste"] = 0, ["Resilience"] = 0, ["Mana per 5"] = 0,
-        ["Weapon DPS"] = 0, ["Ranged DPS"] = 0, ["Attack Power"] = 0, ["Spell Power"] = 0, 
-        ["Spell Damage"] = 0, ["Armor Pen"] = 0, ["Spell Pen"] = 0, ["Expertise"] = 0
-        } 
-    }
+    -- Global Multi-Class Storage Dictionary Map
+    classProfiles = {}
+}
 
 -- Mapping database translating tooltip string text matching rules to database indices
--- Fortified pattern table matching Conquest of Azeroth tooltip text to stat indices
 local STAT_PATTERNS = {
     { key = "Strength",     pats = { "%+(%d+) Strength", "%+(%d+) strength" } },
     { key = "Agility",      pats = { "%+(%d+) Agility", "%+(%d+) agility" } },
@@ -46,17 +50,13 @@ local STAT_PATTERNS = {
     { key = "Spell Power",  pats = { "spell power", "Spell Power", "Increases spell power by (%d+)" } },
     { key = "Spell Damage", pats = { "Increases spell damage by (%d+)" } },
     { key = "Armor Pen",    pats = { "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)", "armor penetration rating by (%d+)" } },
-    
-    -- Added: Explicit text capture patterns for Spell Pen and Expertise
     { key = "Spell Pen",    pats = { "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)", "spell penetration by (%d+)" } },
     { key = "Expertise",    pats = { "expertise rating", "Expertise", "Improves expertise rating by (%d+)", "expertise rating by (%d+)" } },
-    
     { key = "Weapon DPS",   pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
     { key = "Ranged DPS",   pats = { "Ranged.*((%d+%.?%d*)) damage per second" } },
     { key = "Resilience",   pats = { "resilience rating", "Resilience", "resilience rating by (%d+)" } },
     { key = "Mana per 5",   pats = { "mana per 5 sec", "Restores (%d+) mana per 5", "mana per 5 seconds" } }
 }
-
 
 -- Hidden tooltip structure to scan item requirements and extract raw stats numbers
 local scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
@@ -83,36 +83,11 @@ local function IsItemUnusable(itemLink)
     return unusable
 end
 
-local function CalculateItemScore(itemLink)
-    if not itemLink or not AutoRollConfig or not AutoRollConfig.weights then 
-        return 0 
-    end
-    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
-    scannerTooltip:ClearLines()
-    scannerTooltip:SetHyperlink(itemLink)
-    local totalScore = 0
-    for i = 1, scannerTooltip:NumLines() do
-        local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
-        if leftLine then
-            local text = leftLine:GetText()
-            if text then
-                for _, item in ipairs(STAT_PATTERNS) do
-                    local weight = AutoRollConfig.weights[item.key] or 0
-                    if weight > 0 then
-                        for _, pattern in ipairs(item.pats) do
-                            local match = string.match(text, pattern)
-                            if match then 
-                                totalScore = totalScore + (tonumber(match) * weight) 
-                                break 
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    scannerTooltip:Hide()
-    return totalScore
+-- Helper macro to automatically query your active character class name string on demand
+local function GetPlayerClassProfile()
+    local _, classFilename = UnitClass("player")
+    -- In custom clients, UnitClass always returns a clean localized name string (like "Tinker" or "Witch Doctor")
+    return classFilename or "Unknown"
 end
 
 -- Anchors universally mapped cross-references to secure error-free page loads
@@ -226,6 +201,7 @@ local function ProcessLootRoll(rollID, itemLink)
     if not AutoRollConfig or not AutoRollConfig.enabled or handledRolls[rollID] then 
         return 
     end
+    local playerClass = GetPlayerClassProfile()
     local itemName, _, itemRarity, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     if not itemName then 
         return 
@@ -239,7 +215,9 @@ local function ProcessLootRoll(rollID, itemLink)
     if (itemType == "Armor" or itemSubClass == "Shields") and (AutoRollConfig.bulkArmor == 0 or (AutoRollConfig.armor and AutoRollConfig.armor[itemSubClass] == 0)) then return end
     if itemType == "Weapon" and (AutoRollConfig.bulkWeapons == 0 or (AutoRollConfig.weapons and AutoRollConfig.weapons[itemSubClass] == 0)) then return end
     if AutoRollConfig.autoGreedUnusable and IsItemUnusable(itemLink) then if ExecuteRollChoice(rollID, 2, itemLink, "Unusable") then return end end
-    if AutoRollConfig.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] then
+    
+    -- Fortified check verifying your shared multi-class account database profiles exist before scoring items
+    if AutoRollConfig.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
         local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
         local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
         if droppedScore > equippedScore then if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
@@ -260,7 +238,6 @@ local function ProcessLootRoll(rollID, itemLink)
     end
 end
 
-local UpdateButtonVisuals
 local dropdownCounter = 0
 
 local function ForcePanelVisualSync()
@@ -308,17 +285,36 @@ local function CreateDropdownMenu(parent, label, x, y, configTable, key, bulkCat
 end
 
 local function CreateCheckbox(parent, label, x, y, configTable, key)
-    local name = "AutoRollCheckButton_Master_" .. key local cb = CreateFrame("CheckButton", name, parent, "InterfaceOptionsCheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", x, y) local text = _G[name .. "Text"] if text then text:SetText(label) end
-    cb:SetScript("OnShow", function(self) if configTable then self:SetChecked(configTable[key]) end end)
-    cb:SetScript("OnClick", function(self) if configTable then configTable[key] = not not self:GetChecked() end end)
+    local name = "AutoRollCheckButton_Master_" .. key 
+    local cb = CreateFrame("CheckButton", name, parent, "InterfaceOptionsCheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", x, y) 
+    
+    local text = _G[name .. "Text"] 
+    if text then 
+        text:SetText(label) 
+    end
+    
+    -- Fixed: Instantly evaluates and stamps your database settings on creation
+    if configTable and configTable[key] ~= nil then
+        cb:SetChecked(configTable[key])
+    end
+    
+    cb:SetScript("OnShow", function(self) 
+        if configTable and configTable[key] ~= nil then 
+            self:SetChecked(configTable[key]) 
+        end 
+    end)
+    
+    cb:SetScript("OnClick", function(self) 
+        if configTable then 
+            configTable[key] = not not self:GetChecked() 
+        end 
+    end)
+    
     return cb
 end
 
--- Create a completely custom font profile that bypasses the client's hardcoded gray theme
-local AutoRollWhiteFont = CreateFont("AutoRollWhiteFont")
-AutoRollWhiteFont:SetFont([[Fonts\FRIZQT__.TTF]], 10, "")
-AutoRollWhiteFont:SetTextColor(1, 1, 1, 1)
+
 
 local function BuildWeightEditUI()
     if weightFrame or not AutoRollConfig then 
@@ -326,11 +322,16 @@ local function BuildWeightEditUI()
     end
     
     local editBoxesTable = {}
+    local playerClass = GetPlayerClassProfile()
     
-    if AutoRollConfig.weights then
-        for k, v in pairs(AutoRollConfig.weights) do 
-            tempWeights[k] = tonumber(v) or 0 
-        end
+    -- Dynamically ensure a secure, isolated stat table archetype exists for this class filename
+    if not AutoRollConfig.classProfiles[playerClass] then
+        AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable()
+    end
+    
+    -- Load active weights from this character's specific class library slot into temporary memory
+    for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do 
+        tempWeights[k] = tonumber(v) or 0 
     end
     
     weightFrame = CreateFrame("Frame", "AutoRollWeightFrame", UIParent) 
@@ -338,9 +339,10 @@ local function BuildWeightEditUI()
     weightFrame:SetPoint("TOPLEFT", statFrame, "BOTTOMLEFT", 0, -5)
     weightFrame:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 5, right = 5, top = 5, bottom = 5 } })
     
+    -- Displays the active class dynamically right in the window sub-header title
     local title = weightFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal") 
     title:SetPoint("TOP", 0, -15) 
-    title:SetText("|cFF3399FFModify Scale Weights|r")
+    title:SetText("|cFF3399FFModify weights: " .. playerClass .. "|r")
     
     local close = CreateFrame("Button", nil, weightFrame, "UIPanelCloseButton") 
     close:SetPoint("TOPRIGHT", -2, -2)
@@ -354,13 +356,11 @@ local function BuildWeightEditUI()
     content:SetHeight(520) 
     scrollFrame:SetScrollChild(content)
     
-    -- Smart Fix: Spawns an invisible 1x1 dummy box at the exact ceiling edge to absorb the template texture crash
     local dummy = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
-    dummy:SetSize(1, 1)
-    dummy:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+    dummy:SetSize(1, 1) 
+    dummy:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0) 
     dummy:Hide()
     
-    -- Re-ordered category matrix array matching your website layout blocks exactly
     local categorizedKeys = {
         { isHeader = true,  text = "|cFFFFD100[ Primary Stats ]|r" },
         { isStat = true,    key = "Strength" },
@@ -368,32 +368,31 @@ local function BuildWeightEditUI()
         { isStat = true,    key = "Stamina" },
         { isStat = true,    key = "Intellect" },
         { isStat = true,    key = "Spirit" },
-        
         { isHeader = true,  text = "|cFFFFD100[ Secondary Stats ]|r" },
         { isStat = true,    key = "Crit" },
         { isStat = true,    key = "Hit" },
         { isStat = true,    key = "Haste" },
         { isStat = true,    key = "Resilience" },
         { isStat = true,    key = "Mana per 5" },
-        
         { isHeader = true,  text = "|cFFFFD100[ Offensive Stats ]|r" },
         { isStat = true,    key = "Weapon DPS" },
         { isStat = true,    key = "Ranged DPS" },
         { isStat = true,    key = "Attack Power" },
+        { isStat = true,    key = "Ranged Attack Power" }, -- Forces the layout loop to build the field
         { isStat = true,    key = "Spell Power" },
         { isStat = true,    key = "Spell Damage" },
         { isStat = true,    key = "Armor Pen" },
         { isStat = true,    key = "Spell Pen" },
         { isStat = true,    key = "Expertise" }
     }
+
     
     local totalYOffset = 0
-    
     for _, item in ipairs(categorizedKeys) do
         if item.isHeader then
             totalYOffset = totalYOffset - 12
             local headerTxt = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-            headerTxt:SetPoint("TOPLEFT", content, "TOPLEFT", 5, totalYOffset)
+            headerTxt:SetPoint("TOPLEFT", content, "TOPLEFT", 5, totalYOffset) 
             headerTxt:SetText(item.text)
             totalYOffset = totalYOffset - 18
         elseif item.isStat then
@@ -405,13 +404,13 @@ local function BuildWeightEditUI()
             lbl:SetJustifyH("LEFT")
             
             local boxWrapper = CreateFrame("Frame", nil, content)
-            boxWrapper:SetSize(65, 18)
+            boxWrapper:SetSize(65, 18) 
             boxWrapper:SetPoint("LEFT", lbl, "RIGHT", 5, 0)
             
             local eb = CreateFrame("EditBox", nil, boxWrapper, "InputBoxTemplate") 
-            eb:SetAllPoints(boxWrapper)
+            eb:SetAllPoints(boxWrapper) 
             eb:SetAutoFocus(false) 
-            eb:SetMaxLetters(6)
+            eb:SetMaxLetters(6) 
             eb:SetTextInsets(4, 0, 0, 0)
             
             editBoxesTable[key] = eb
@@ -420,7 +419,6 @@ local function BuildWeightEditUI()
                 local currentVal = tempWeights[key] or 0
                 self:SetText(tostring(currentVal)) 
             end)
-            
             eb:SetScript("OnTextChanged", function(self) 
                 local txt = self:GetText() 
                 if txt and txt ~= "" then 
@@ -429,11 +427,9 @@ local function BuildWeightEditUI()
                     tempWeights[key] = 0 
                 end 
             end)
-            
             totalYOffset = totalYOffset - 24
         end
     end
-    
     content:SetHeight(math.abs(totalYOffset) + 20)
     
     local saveBtn = CreateFrame("Button", nil, weightFrame, "UIPanelButtonTemplate")
@@ -442,16 +438,22 @@ local function BuildWeightEditUI()
     saveBtn:SetText("[ Save Weights ]")
     
     saveBtn:SetScript("OnClick", function()
-        if not AutoRollConfig or not AutoRollConfig.weights then return end
+        if not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then 
+            return 
+        end
         for k, v in pairs(tempWeights) do
             local cleanNum = tonumber(v)
             if not cleanNum or type(cleanNum) ~= "number" then cleanNum = 0 end
-            AutoRollConfig.weights[k] = cleanNum
+            AutoRollConfig.classProfiles[playerClass][k] = cleanNum
         end
-        if weightFrame and weightFrame:IsShown() then weightFrame:Hide() weightFrame:Show() end
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[AutoRoll]|r Scale weights saved successfully to character profile!")
+        if weightFrame and weightFrame:IsShown() then 
+            weightFrame:Hide() 
+            weightFrame:Show() 
+        end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[AutoRoll]|r Saved successfully to the shared account-wide |cFFFFFFFF%s|r profile library slot!", playerClass))
     end)
 end
+
 
 
 local function BuildStatUI()
@@ -641,12 +643,15 @@ local function BuildLauncherButton()
 end
 
 local isLoaded = false
+
 local function InitializeAddon() 
     if isLoaded then return end 
     isLoaded = true 
-    if type(AutoRollConfig) ~= "table" or not AutoRollConfig.weights or type(AutoRollConfig.armor) ~= "table" then 
+    
+    if type(AutoRollConfig) ~= "table" or not AutoRollConfig.classProfiles then 
         AutoRollConfig = nil 
     end
+    
     if not AutoRollConfig then 
         AutoRollConfig = defaults 
     else 
@@ -656,8 +661,28 @@ local function InitializeAddon()
             end 
         end 
     end 
+    
+    local playerClass = GetPlayerClassProfile()
+    if AutoRollConfig.classProfiles and not AutoRollConfig.classProfiles[playerClass] then
+        AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable()
+    end
+    
+    -- Fortified Check: Safely forces old or cached profiles to generate missing fields
+    if AutoRollConfig.classProfiles[playerClass]["Ranged Attack Power"] == nil then
+        AutoRollConfig.classProfiles[playerClass]["Ranged Attack Power"] = 0
+    end
+    
+    -- Direct Restoration Loop: Hydrates temporary session memory with saved variables from disk
+    if AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
+        for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do
+            tempWeights[k] = tonumber(v) or 0
+        end
+    end
+    
     BuildLauncherButton() 
 end
+
+
 
 mainFrame:SetScript("OnEvent", function(self, event, arg1) 
     if event == "ADDON_LOADED" and arg1 == "AutoRoll" then pcall(InitializeAddon) elseif event == "PLAYER_LOGIN" then pcall(InitializeAddon) elseif event == "START_LOOT_ROLL" then local rollID = arg1 local itemLink = GetLootRollItemLink(rollID) handledRolls[rollID] = false if itemLink then pcall(ProcessLootRoll, rollID, itemLink) end elseif event == "CANCEL_LOOT_ROLL" then handledRolls[arg1] = nil end 
