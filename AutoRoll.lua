@@ -32,26 +32,31 @@ local defaults = {
     }
 
 -- Mapping database translating tooltip string text matching rules to database indices
+-- Fortified pattern table matching Conquest of Azeroth tooltip text to stat indices
 local STAT_PATTERNS = {
     { key = "Strength",     pats = { "%+(%d+) Strength", "%+(%d+) strength" } },
     { key = "Agility",      pats = { "%+(%d+) Agility", "%+(%d+) agility" } },
     { key = "Stamina",      pats = { "%+(%d+) Stamina", "%+(%d+) stamina" } },
     { key = "Intellect",    pats = { "%+(%d+) Intellect", "%+(%d+) intellect" } },
     { key = "Spirit",       pats = { "%+(%d+) Spirit", "%+(%d+) spirit" } },
-    { key = "Crit",         pats = { "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)" } },
-    { key = "Hit",          pats = { "hit rating", "Hit Rating", "Improves hit rating by (%d+)" } },
-    { key = "Haste",        pats = { "haste rating", "Haste Rating", "Improves haste rating by (%d+)" } },
-    { key = "Spell Power",  pats = { "spell power", "Spell Power", "Increases spell power by (%d+)" } },
+    { key = "Crit",         pats = { "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)", "critical strike rating by (%d+)" } },
+    { key = "Hit",          pats = { "hit rating", "Hit Rating", "Improves hit rating by (%d+)", "hit rating by (%d+)" } },
+    { key = "Haste",        pats = { "haste rating", "Haste Rating", "Improves haste rating by (%d+)", "haste rating by (%d+)" } },
     { key = "Attack Power", pats = { "attack power", "Attack Power", "Increases attack power by (%d+)" } },
-    { key = "PvE Power",    pats = { "pve power", "PvE Power", "Increases PvE Power by (%d+)" } },
-    { key = "Armor Pen",    pats = { "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)" } },
+    { key = "Spell Power",  pats = { "spell power", "Spell Power", "Increases spell power by (%d+)" } },
+    { key = "Spell Damage", pats = { "Increases spell damage by (%d+)" } },
+    { key = "Armor Pen",    pats = { "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)", "armor penetration rating by (%d+)" } },
+    
+    -- Added: Explicit text capture patterns for Spell Pen and Expertise
+    { key = "Spell Pen",    pats = { "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)", "spell penetration by (%d+)" } },
+    { key = "Expertise",    pats = { "expertise rating", "Expertise", "Improves expertise rating by (%d+)", "expertise rating by (%d+)" } },
+    
     { key = "Weapon DPS",   pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
     { key = "Ranged DPS",   pats = { "Ranged.*((%d+%.?%d*)) damage per second" } },
-    { key = "Spell Damage", pats = { "Increases spell damage by (%d+)" } },
-    { key = "Healing Power",pats = { "Increases healing power by (%d+)" } },
-    { key = "Resilience",   pats = { "resilience rating", "Resilience" } },
-    { key = "Mana per 5",   pats = { "mana per 5 sec", "Restores (%d+) mana per 5" } }
+    { key = "Resilience",   pats = { "resilience rating", "Resilience", "resilience rating by (%d+)" } },
+    { key = "Mana per 5",   pats = { "mana per 5 sec", "Restores (%d+) mana per 5", "mana per 5 seconds" } }
 }
+
 
 -- Hidden tooltip structure to scan item requirements and extract raw stats numbers
 local scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
@@ -135,6 +140,55 @@ mainFrame:RegisterEvent("ADDON_LOADED")
 mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("START_LOOT_ROLL")
 mainFrame:RegisterEvent("CANCEL_LOOT_ROLL")
+--Test code below
+-- Global Tooltip Hook for Ondemand Diagnostic Scans
+GameTooltip:HookScript("OnTooltipSetItem", function(self)
+    -- Only runs if you are holding down the Left or Right Control key to prevent chat spam
+    if IsControlKeyDown() then
+        local _, itemLink = self:GetItem()
+        if not itemLink then return end
+        
+        local itemName = GetItemInfo(itemLink)
+        if not itemName then return end
+        
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
+        
+        local totalScore = 0
+        -- Scan every visible line inside your active tooltip container
+        for i = 1, self:NumLines() do
+            local leftLine = _G[self:GetName() .. "TextLeft" .. i]
+            if leftLine then
+                local text = leftLine:GetText()
+                if text then
+                    local lineMatched = false
+                    for _, item in ipairs(STAT_PATTERNS) do
+                        local weight = (AutoRollConfig and AutoRollConfig.weights and AutoRollConfig.weights[item.key]) or 0
+                        for _, pattern in ipairs(item.pats) do
+                            local match = string.match(text, pattern)
+                            if match then
+                                local value = tonumber(match) or 0
+                                local lineScore = value * weight
+                                totalScore = totalScore + lineScore
+                                lineMatched = true
+                                DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
+                                break
+                            end
+                        end
+                        if lineMatched then break end
+                    end
+                    -- If a line has stats but our patterns missed it completely, print it as unmapped text
+                    if not lineMatched and (string.find(text, "%+%d+") or string.find(text, "rating") or string.find(text, "per second")) then
+                        DEFAULT_CHAT_FRAME:AddMessage("  |cFFFF0000[UNMAPPED LINE]:|r \"" .. text .. "\"")
+                    end
+                end
+            end
+        end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00Final Calculated Total Score:|r |cFFFFFFFF%.2f|r", totalScore))
+    end
+end)
+
+
+
 
 local function CloseActiveLootFrame(rollID)
     for i = 1, 4 do
