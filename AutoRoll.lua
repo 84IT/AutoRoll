@@ -819,16 +819,73 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         end
 
         
-        -- 2. Check for equipped item in that slot and calculate its comparison baseline score
+                -- 2. Fortified Character Slot Detector adapted for Conquest of Azeroth
         local equippedScore = 0
         local equippedItemLink = nil
-        if itemEquipLoc and SLOT_MAP[itemEquipLoc] then
-            local slotID = SLOT_MAP[itemEquipLoc]
-            equippedItemLink = GetInventoryItemLink("player", slotID)
-            if equippedItemLink then
-                equippedScore = CalculateItemScore(equippedItemLink)
+        local foundSlotID = nil
+
+                -- A. Handle explicit weapon/shield/off-hand slots with priority pairing logic
+        -- Smart Filter: If the item subclass is a core armor type (Cloth, Leather, Mail, Plate), it is FORCED to skip weapon logic!
+        local isCoreArmor = (itemSubClass == "Cloth" or itemSubClass == "Leather" or itemSubClass == "Mail" or itemSubClass == "Plate")
+        
+        if not isCoreArmor and (itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemType == "Weapon") then
+            local mhLink = GetInventoryItemLink("player", 16)
+            local ohLink = GetInventoryItemLink("player", 17)
+            
+            local mhScore = mhLink and CalculateItemScore(mhLink) or 0
+            local ohScore = ohLink and CalculateItemScore(ohLink) or 0
+            
+            equippedScore = mhScore + ohScore
+            equippedItemLink = string.format("MH: %s + OH: %s", mhLink or "[Empty]", ohLink or "[Empty]")
+            
+            if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or string.find(string.lower(itemEquipLoc or ""), "main") then
+                totalDroppedScore = totalDroppedScore + ohScore
+            elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or string.find(string.lower(itemEquipLoc or ""), "shield") or string.find(string.lower(itemEquipLoc or ""), "off") then
+                totalDroppedScore = mhScore + totalDroppedScore
+            end
+            foundSlotID = 16 -- Flag to skip standard armor check
+        end
+
+
+        -- B. Fallback Armor Check: If slot isn't found yet, read the tooltip text directly to identify armor slots!
+        if not foundSlotID then
+            local lowerLinkStr = string.lower(itemLink or "")
+            -- Primary text boundary loop scanning for explicit server gear strings
+            for i = 1, self:NumLines() do
+                local leftLine = _G[self:GetName() .. "TextLeft" .. i]
+                local lineText = leftLine and leftLine:GetText() or ""
+                if lineText ~= "" then
+                    if string.find(lineText, "Head") or string.find(lineText, "Helm") then foundSlotID = 1 break
+                    elseif string.find(lineText, "Neck") or string.find(lineText, "Amulet") then foundSlotID = 2 break
+                    elseif string.find(lineText, "Shoulder") then foundSlotID = 3 break
+                    elseif string.find(lineText, "Chest") or string.find(lineText, "Robe") or string.find(lineText, "Vest") then foundSlotID = 5 break
+                    elseif string.find(lineText, "Waist") or string.find(lineText, "Belt") or string.find(lineText, "Girdle") then foundSlotID = 6 break
+                    elseif string.find(lineText, "Legs") or string.find(lineText, "Pants") or string.find(lineText, "Greaves") then foundSlotID = 7 break
+                    elseif string.find(lineText, "Feet") or string.find(lineText, "Boots") then foundSlotID = 8 break
+                    elseif string.find(lineText, "Wrist") or string.find(lineText, "Bracers") then foundSlotID = 9 break
+                    elseif string.find(lineText, "Hands") or string.find(lineText, "Gloves") or string.find(lineText, "Handwraps") or string.find(lineText, "Gauntlets") then foundSlotID = 10 break
+                    elseif string.find(lineText, "Finger") or string.find(lineText, "Ring") then foundSlotID = 11 break
+                    elseif string.find(lineText, "Trinket") then foundSlotID = 12 break
+                    elseif string.find(lineText, "Back") or string.find(lineText, "Cloak") or string.find(lineText, "Cape") then foundSlotID = 15 break
+                    end
+                end
+            end
+            
+            -- If text scanning fails, fall back to our SLOT_MAP configuration dictionary
+            if not foundSlotID and itemEquipLoc and SLOT_MAP and SLOT_MAP[itemEquipLoc] then
+                foundSlotID = SLOT_MAP[itemEquipLoc]
+            end
+
+            -- Execute the gear sheet query using the successfully isolated slot integer number
+            if foundSlotID then
+                local standardLink = GetInventoryItemLink("player", foundSlotID)
+                if standardLink then
+                    equippedScore = CalculateItemScore(standardLink)
+                    equippedItemLink = standardLink
+                end
             end
         end
+
         
         -- 3. Print the comprehensive dual-score mathematical evaluation to chat
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[Target Item Score]:|r %.2f", totalDroppedScore))
