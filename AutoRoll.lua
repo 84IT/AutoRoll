@@ -32,12 +32,14 @@ local function GetBlankCharSettings()
         weapons = {
             ["Daggers"] = 0, ["One-Handed Swords"] = 0, ["Two-Handed Swords"] = 0, ["One-Handed Maces"] = 0,
             ["Two-Handed Maces"] = 0, ["One-Handed Axes"] = 0, ["Two-Handed Axes"] = 0, ["Staves"] = 0, ["Bows"] = 0, ["Guns"] = 0,
-            ["Crossbows"] = 0
+            ["Crossbows"] = 0, ["Fist Weapons"] = 0, ["Polearms"] = 0, ["Wands"] = 0 -- Fixed: Added Wands tracking slot!
         },
         quality = { ["Green"] = 0, ["Blue"] = 0, ["Purple"] = 0 },
         statModuleEnabled = false
     }
 end
+
+
 
 -- Configuration Defaults Profile with integrated global and local storage dictionary maps
 local defaults = {
@@ -89,32 +91,49 @@ function CalculateItemScore(itemLink)
     for i = 1, scannerTooltip:NumLines() do
         local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
         if leftLine then
-            local text = leftLine:GetText()
-            if text then
-                -- Set Bonus Shield: Skips line immediately if it contains set piece bonus markers
-                if string.find(text, "Set:") or string.find(text, "%(%d+%)%s*Set") then
-                    -- Skips straight to the next line without running text pattern matches
-                else
-                    for _, item in ipairs(STAT_PATTERNS) do
-                        local weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
-                        if weight > 0 then
-                            for _, pattern in ipairs(item.pats) do
-                                local match = string.match(text, pattern)
-                                if match then 
-                                    totalScore = totalScore + (tonumber(match) * weight) 
-                                    break 
+            local rawText = leftLine:GetText()
+            if rawText and rawText ~= "" then
+                if not string.find(rawText, "Set:") and not string.find(rawText, "%(%d+%)%s*Set") then
+                    for text in string.gmatch(rawText, "[^\r\n]+") do
+                        for _, item in ipairs(STAT_PATTERNS) do
+                            local weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
+                            if weight > 0 then
+                                local cleanPat = nil
+                                if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
+                                elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
+                                elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
+                                elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
+                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
+                                end
+                                
+                                if cleanPat then
+                                    local match = string.match(text, cleanPat)
+                                    if match and tonumber(match) then
+                                        totalScore = totalScore + (tonumber(match) * weight)
+                                    end
+                                else
+                                    for _, pattern in ipairs(item.pats) do
+                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
+                                        local match = string.match(text, cleanPattern)
+                                        -- Fixed: Explicit type validation wrapper prevents arithmetic crashes on plain text strings
+                                        if match and tonumber(match) then 
+                                            totalScore = totalScore + (tonumber(match) * weight) 
+                                            break 
+                                        end
+                                    end
                                 end
                             end
                         end
                     end
-                end -- End of Set Shield check
+                end
             end
         end
     end
-
     scannerTooltip:Hide()
     return totalScore
 end
+
+
 
 
 scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
@@ -125,16 +144,42 @@ local function IsItemUnusable(itemLink)
     scannerTooltip:ClearLines()
     scannerTooltip:SetHyperlink(itemLink)
     local unusable = false
+    
     for i = 1, scannerTooltip:NumLines() do
         local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
         if leftLine then
+            local text = leftLine:GetText() or ""
             local r, g, b = leftLine:GetTextColor()
-            if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 then unusable = true break end
+            
+            -- Method A: Check for native UI line color markers (Standard red text lines)
+            if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
+                -- Only bypass if the actual text of THIS line says "level" or "requires"
+                if not string.find(string.lower(text), "level") and not string.find(string.lower(text), "requires") then
+                    unusable = true 
+                    break 
+                end
+            end
+            
+            -- Method B: Check for hidden embedded server color tags (Handles mixed text colors on a single line)
+            if text ~= "" then
+                local lowerText = string.lower(text)
+                -- Looks for the hex color code for bright red (|cffff0000) while ensuring it isn't a level requirement
+                if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then
+                    unusable = true
+                    break
+                elseif string.find(lowerText, "can't equip") or string.find(lowerText, "cannot equip") then
+                    -- Absolute fallback safety check for direct server restriction phrasing
+                    unusable = true
+                    break
+                end
+            end
         end
     end
     scannerTooltip:Hide()
     return unusable
 end
+
+
 
 function GetPlayerClassProfile()
     local localClassName, _ = UnitClass("player")
@@ -249,41 +294,138 @@ local function ProcessLootRoll(rollID, itemLink)
     elseif itemRarity == 4 then rarityKey = "Purple"
     end
     
-    if cCfg.bulkQuality == 0 or (rarityKey and cCfg.quality and cCfg.quality[rarityKey] == 0) then return end
-    if (itemType == "Armor" or itemSubClass == "Shields") and (cCfg.bulkArmor == 0 or (cCfg.armor and cCfg.armor[itemSubClass] == 0)) then return end
-    if itemType == "Weapon" and (cCfg.bulkWeapons == 0 or (cCfg.weapons and cCfg.weapons[itemSubClass] == 0)) then return end
-    if cCfg.autoGreedUnusable and IsItemUnusable(itemLink) then if ExecuteRollChoice(rollID, 2, itemLink, "Unusable") then return end end
+    -- Smart Rarity Fallback: If the server cache misses the numeric rarity, check the text color tag directly!
+    if not rarityKey and itemLink then
+        if string.find(itemLink, "|cff1eff00") then rarityKey = "Green"
+        elseif string.find(itemLink, "|cff0070dd") or string.find(itemLink, "|cff0070d8") then rarityKey = "Blue"
+        elseif string.find(itemLink, "|cffa335ee") then rarityKey = "Purple"
+        end
+    end
     
-        -- Weapon Exception Override: Prevents automatic stat passes on alternative weapon combos
-    if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" then
+    -- Server Normalization Shield: Automatically catches mislabeled server items (like generic One-Hand tags, Crossbow vs Crossbows)
+    if itemType == "Weapon" then
+        local lowerSub = string.lower(itemSubClass or "")
+        local lowerEquip = string.lower(itemEquipLoc or "")
+        
+        -- If it matches any ranged identifiers or generic hand labels, force it to evaluate under your unified 'Ranged' rules matrix
+        if string.find(lowerSub, "bow") or string.find(lowerSub, "gun") or string.find(lowerSub, "ranged") or string.find(lowerEquip, "ranged") or lowerSub == "one-hand" or lowerSub == "one-handed" or lowerSub == "two-hand" or lowerSub == "two-handed" then
+            for i = 2, scannerTooltip:NumLines() do
+                local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+                local lineText = leftLine and leftLine:GetText() or ""
+                if lineText ~= "" then
+                    if string.find(lineText, "Ranged") or string.find(lineText, "Bow") or string.find(lineText, "Crossbow") or string.find(lineText, "Gun") then
+                        itemSubClass = "Ranged"
+                        break
+                    elseif string.find(lineText, "Dagger") then itemSubClass = "Daggers" break
+                    elseif string.find(lineText, "Staff") or string.find(lineText, "Staves") then itemSubClass = "Staves" break
+                    elseif string.find(lineText, "Mace") then itemSubClass = (string.find(lowerSub, "two")) and "Two-Handed Maces" or "One-Handed Maces" break
+                    elseif string.find(lineText, "Sword") then itemSubClass = (string.find(lowerSub, "two")) and "Two-Handed Swords" or "One-Handed Swords" break
+                    elseif string.find(lineText, "Axe") then itemSubClass = (string.find(lowerSub, "two")) and "Two-Handed Axes" or "One-Handed Axes" break
+                    elseif string.find(lineText, "Fist") or string.find(lineText, "Claw") or string.find(lineText, "Knuckles") then itemSubClass = "Fist Weapons" break
+                    elseif string.find(lineText, "Polearm") then itemSubClass = "Polearms" break
+                    end
+                end
+            end
+            
+            -- Absolute baseline fallback for standalone missile weapons
+            if string.find(lowerSub, "bow") or string.find(lowerSub, "gun") or string.find(lowerSub, "ranged") or string.find(lowerEquip, "ranged") then
+                itemSubClass = "Ranged"
+            end
+        end
+    end
+    
+    -- 1. PRIORITY ONE: Universal Quality Rarity Filter Sweep
+    if rarityKey and cCfg.quality then
+        local qChoice = 0 
+        if cCfg.bulkQuality and cCfg.bulkQuality > 0 then 
+            qChoice = cCfg.bulkQuality 
+        else 
+            qChoice = cCfg.quality[rarityKey] or 0 
+        end
+        if qChoice > 0 then 
+            if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then 
+                return 
+            end 
+        end
+    end
+    
+    -- 2. PRIORITY TWO: Catch-All Red Text Armor & Requirement Filter
+    if cCfg.autoGreedUnusable and IsItemUnusable(itemLink) then 
+        if ExecuteRollChoice(rollID, 2, itemLink, "Unusable Red Text") then 
+            return 
+        end 
+    end
+    
+    -- 3. PRIORITY THREE: Specific Structural Armor Rule Matching
+    if (itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor then
+        local aChoice = 0 
+        if cCfg.bulkArmor and cCfg.bulkArmor > 0 then 
+            aChoice = cCfg.bulkArmor 
+        else 
+            aChoice = cCfg.armor[itemSubClass] or 0 
+        end
+        if aChoice > 0 then 
+            if ExecuteRollChoice(rollID, aChoice, itemLink, "Armor Filter: " .. itemSubClass) then 
+                return 
+            end 
+        end
+    end
+    
+    -- 4. PRIORITY FOUR: Weapon Exception Override (Skips manual pause if set to Auto-Greed or Auto-Pass)
+    if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" then
+        local checkSubClass = itemSubClass
+        if itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Crossbow" then
+            checkSubClass = "Ranged"
+        end
+        
+        if cCfg.weapons and cCfg.weapons[checkSubClass] and cCfg.weapons[checkSubClass] > 0 then
+            if ExecuteRollChoice(rollID, cCfg.weapons[checkSubClass], itemLink, "Weapon Auto Filter: " .. checkSubClass) then
+                return 
+            end
+        end
+        
         local droppedScore = CalculateItemScore(itemLink)
         if alertTextString then 
             alertTextString:SetText("|cFFFFD100Weapon Dropped! Manual Choice Required|r") 
         end
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon combo piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore))
-        return -- Safely exits the function right here, leaving the roll window open for you!
+        return 
     end
-
+    
+    -- 5. PRIORITY FIVE: Specific Structural Weapon Rule Matching Fallback
+    if itemType == "Weapon" and cCfg.weapons then
+        local wChoice = 0 
+        local finalSubClass = itemSubClass
+        if itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Crossbow" then finalSubClass = "Ranged" end
+        
+        if cCfg.bulkWeapons and cCfg.bulkWeapons > 0 then 
+            wChoice = cCfg.bulkWeapons 
+        else 
+            wChoice = cCfg.weapons[finalSubClass] or 0 
+        end
+        if wChoice > 0 then 
+            if ExecuteRollChoice(rollID, wChoice, itemLink, "Weapon Filter: " .. finalSubClass) then 
+                return 
+            end 
+        end
+    end
+    
+    -- 6. PRIORITY SIX: Smart Stats Module Inventory Scaling Inspector
     if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
-        local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
-        local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
-        if droppedScore > equippedScore then if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
+        local slotID = SLOT_MAP[itemEquipLoc] 
+        local equippedItemLink = GetInventoryItemLink("player", slotID)
+        local droppedScore = CalculateItemScore(itemLink) 
+        local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
+        
+        if droppedScore > equippedScore then 
+            if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[AutoRoll Alert]|r %s (|cFF00FF00Weight Score: %.2f|r) beats Equipped (|cFFFF0000Score: %.2f|r). Suggesting NEED!", itemLink, droppedScore, equippedScore))
         end
     end
-    if rarityKey and cCfg.quality then
-        local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
-        if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter") then return end end
-    end
-    if (itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor then
-        local aChoice = 0 if cCfg.bulkArmor and cCfg.bulkArmor > 0 then aChoice = cCfg.bulkArmor else aChoice = cCfg.armor[itemSubClass] or 0 end
-        if aChoice > 0 then if ExecuteRollChoice(rollID, aChoice, itemLink, itemSubClass) then return end end
-    end
-    if itemType == "Weapon" and cCfg.weapons then
-        local wChoice = 0 if cCfg.bulkWeapons and cCfg.bulkWeapons > 0 then wChoice = cCfg.bulkWeapons else wChoice = cCfg.weapons[itemSubClass] or 0 end
-        if wChoice > 0 then if ExecuteRollChoice(rollID, wChoice, itemLink, itemSubClass) then return end end
-    end
 end
+
+
+
 
 
 local dropdownCounter = 0
@@ -318,34 +460,89 @@ local function SyncBulkQualityOptions(val)
 end
 
 local function CreateDropdownMenu(parent, label, x, y, configTable, key, bulkCategory)
-    dropdownCounter = dropdownCounter + 1 local name = "AutoRollDropdown_" .. dropdownCounter
-    local lbl = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall") lbl:SetPoint("TOPLEFT", x, y) lbl:SetText(label)
-    local f = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate") f:SetPoint("TOPLEFT", x + 105, y + 7) UIDropDownMenu_SetWidth(f, 75)
-    local options = { "Manual", "Need", "Greed", "Pass" } if bulkCategory then options = { "Custom", "Need", "Greed", "Pass" } end
+    dropdownCounter = dropdownCounter + 1 
+    local name = "AutoRollDropdown_" .. dropdownCounter
+    
+    -- Realignment Shield: Gives the right-hand column a smart, wider text padding offset to completely prevent left-column overlaps
+    local textXOffset = x
+    local menuXOffset = x + 105
+    
+    if x == 210 then
+        textXOffset = x + 24 -- Shifts right-hand text labels slightly outward for perfect spacing
+        menuXOffset = x + 100 -- Standardized tight gutter for the choice menus
+    end
+    
+    local lbl = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall") 
+    lbl:SetPoint("TOPLEFT", parent, "TOPLEFT", textXOffset, y) 
+    lbl:SetText(label)
+    
+    local f = CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate") 
+    f:SetPoint("TOPLEFT", parent, "TOPLEFT", menuXOffset, y + 7) 
+    UIDropDownMenu_SetWidth(f, 75)
+    
+    local options = { "Manual", "Need", "Greed", "Pass" } 
+    if bulkCategory then options = { "Custom", "Need", "Greed", "Pass" } end
+    
     UIDropDownMenu_Initialize(f, function()
         local info = UIDropDownMenu_CreateInfo()
         for i, optName in ipairs(options) do
-            info.text = optName info.value = i - 1 info.checked = (configTable and configTable[key] == (i - 1))
+            info.text = optName 
+            info.value = i - 1 
+            info.checked = (configTable and configTable[key] == (i - 1))
             info.func = function(self)
-                if configTable then configTable[key] = self.value end UIDropDownMenu_SetSelectedValue(f, self.value) UIDropDownMenu_SetText(f, options[self.value + 1])
-                if bulkCategory == "armor" then SyncBulkArmorOptions(self.value) elseif bulkCategory == "weapons" then SyncBulkWeaponOptions(self.value) elseif bulkCategory == "quality" then SyncBulkQualityOptions(self.value) end
+                if configTable then 
+                    configTable[key] = self.value 
+                end 
+                UIDropDownMenu_SetSelectedValue(f, self.value) 
+                UIDropDownMenu_SetText(f, options[self.value + 1])
+                
+                if bulkCategory == "armor" then 
+                    SyncBulkArmorOptions(self.value) 
+                elseif bulkCategory == "weapons" then 
+                    SyncBulkWeaponOptions(self.value) 
+                elseif bulkCategory == "quality" then 
+                    SyncBulkQualityOptions(self.value) 
+                end
+                
+                local charKey = GetCharacterUniqueKey()
+                if AutoRollConfig and AutoRollConfig.charSettings and AutoRollConfig.charSettings[charKey] then
+                    for rID, status in pairs(handledRolls) do
+                        if status == false then
+                            local itemLink = GetLootRollItemLink(rID)
+                            if itemLink then
+                                pcall(ProcessLootRoll, rID, itemLink)
+                            end
+                        end
+                    end
+                end
             end
             UIDropDownMenu_AddButton(info)
         end
     end)
+    
     local currentValue = (configTable and configTable[key]) or 0
-    UIDropDownMenu_SetSelectedValue(f, currentValue) UIDropDownMenu_SetText(f, options[currentValue + 1])
+    UIDropDownMenu_SetSelectedValue(f, currentValue) 
+    UIDropDownMenu_SetText(f, options[currentValue + 1])
     return f
 end
 
+
+
+
 local function CreateCheckbox(parent, label, x, y, configTable, key)
-    local name = "AutoRollCheckButton_Master_" .. key local cb = CreateFrame("CheckButton", name, parent, "InterfaceOptionsCheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", x, y) local text = _G[name .. "Text"] if text then text:SetText(label) end
-    if configTable and configTable[key] ~= nil then cb:SetChecked(configTable[key]) end
-    cb:SetScript("OnShow", function(self) if configTable and configTable[key] ~= nil then self:SetChecked(configTable[key]) end end)
-    cb:SetScript("OnClick", function(self) if configTable then configTable[key] = not not self:GetChecked() end end)
+    local name = "AutoRollCheckButton_Master_" .. tostring(key or dropdownCounter)
+    local cb = CreateFrame("CheckButton", name, parent, "InterfaceOptionsCheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y) -- Re-anchored to the absolute parent container canvas
+    
+    local text = _G[name .. "Text"]
+    if text then text:SetText(label) end
+    
+    if configTable and key and configTable[key] ~= nil then cb:SetChecked(configTable[key]) end
+    cb:SetScript("OnShow", function(self) if configTable and key and configTable[key] ~= nil then self:SetChecked(configTable[key]) end end)
+    cb:SetScript("OnClick", function(self) if configTable and key then configTable[key] = not not self:GetChecked() end end)
     return cb
 end
+
 
 
 
@@ -577,7 +774,6 @@ function BuildUI()
     local cCfg = AutoRollConfig.charSettings[charKey]
     if not cCfg then return end
     
-    -- Restored: Main frame height locked exactly back to 695 pixels as requested
     settingsFrame = CreateFrame("Frame", "AutoRollOptionsFrame", UIParent) 
     settingsFrame:SetSize(490, 695) 
     settingsFrame:SetPoint("CENTER")
@@ -587,7 +783,6 @@ function BuildUI()
     settingsFrame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     settingsFrame:Show()
     
-    -- Realignment: Title shifted leftward (24px padding) and justified left to stay clear of buttons
     local title = settingsFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge") 
     title:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 24, -18) 
     title:SetText("AutoRoll Settings: " .. UnitName("player"))
@@ -596,36 +791,55 @@ function BuildUI()
     local close = CreateFrame("Button", nil, settingsFrame, "UIPanelCloseButton") close:SetPoint("TOPRIGHT", -6, -6)
     close:SetScript("OnClick", function() settingsFrame:Hide() if statFrame then statFrame:Hide() end if weightFrame then weightFrame:Hide() end end)
     
-    -- Realignment: Lowered button down slightly (-18) so it aligns perfectly with the top title string row
     local statToggleBtn = CreateFrame("Button", nil, settingsFrame, "UIPanelButtonTemplate") 
     statToggleBtn:SetSize(110, 22) 
     statToggleBtn:SetPoint("TOPRIGHT", settingsFrame, "TOPRIGHT", -36, -18) 
     statToggleBtn:SetText("Smart Stats >>")
     statToggleBtn:SetScript("OnClick", function() if not statFrame then BuildStatUI() else if statFrame:IsShown() then statFrame:Hide() if weightFrame then weightFrame:Hide() end else statFrame:Show() end end end)
     
-    local masterCB = CreateCheckbox(settingsFrame, "|cFFFFD100Enable AutoRoll Addon Rules|r", 20, -50, cCfg, "enabled")
-    masterCB:SetScript("OnClick", function(self) cCfg.enabled = not not self:GetChecked() UpdateButtonVisuals() end)
+    local scrollFrame = CreateFrame("ScrollFrame", "AutoRollOptionsScrollFrame", settingsFrame, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 12, -45)
+    scrollFrame:SetPoint("BOTTOMRIGHT", settingsFrame, "BOTTOMRIGHT", -36, 230)
     
-    CreateCheckbox(settingsFrame, "Auto-Greed Unusable Items (Red Text)", 20, -75, cCfg, "autoGreedUnusable")
-    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Armor|r", 25, -110, cCfg, "bulkArmor", "armor")
-    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Rarities|r", 250, -110, cCfg, "bulkQuality", "quality")
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetWidth(415)
+    content:SetHeight(520) 
+    scrollFrame:SetScrollChild(content)
+    
+    local dummy = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+    dummy:SetSize(1, 1) dummy:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0) dummy:Hide()
+    
+    local masterCB = CreateCheckbox(content, "|cFFFFD100Enable AutoRoll Addon Rules|r", 10, -5)
+    masterCB:SetScript("OnClick", function(self) cCfg.enabled = not not self:GetChecked() UpdateButtonVisuals() end)
+    if cCfg.enabled ~= nil then masterCB:SetChecked(cCfg.enabled) end
+    
+    CreateCheckbox(content, "Auto-Greed Unusable Items (Red Text)", 10, -30, cCfg, "autoGreedUnusable")
+    
+    -- Realignment: Moved Right column X coordinate from 240 inward to 210 for a tight visual balance
+    CreateDropdownMenu(content, "|cFF00FF00All Armor|r", 15, -65, cCfg, "bulkArmor", "armor")
+    CreateDropdownMenu(content, "|cFF00FF00All Rarities|r", 210, -65, cCfg, "bulkQuality", "quality")
     
     local armors = {"Cloth", "Leather", "Mail", "Plate", "Shields"}
-    for i, name in ipairs(armors) do CreateDropdownMenu(settingsFrame, name, 25, -120 - (i * 28), cCfg.armor, name) end
+    for i, name in ipairs(armors) do CreateDropdownMenu(content, name, 15, -75 - (i * 28), cCfg.armor, name) end
     local qualities = { {label = "|cFF1EFF00Green|r", key = "Green"}, {label = "|cFF0070D8Blue|r", key = "Blue"}, {label = "|cFFA335EEPurple|r", key = "Purple"} }
-    for i, qInfo in ipairs(qualities) do CreateDropdownMenu(settingsFrame, qInfo.label, 250, -120 - (i * 28), cCfg.quality, qInfo.key) end
+    for i, qInfo in ipairs(qualities) do CreateDropdownMenu(content, qInfo.label, 210, -75 - (i * 28), cCfg.quality, qInfo.key) end
     
-    CreateDropdownMenu(settingsFrame, "|cFF00FF00All Weapons|r", 25, -285, cCfg, "bulkWeapons", "weapons")
-    local weaps = { "Daggers", "One-Handed Swords", "Two-Handed Swords", "One-Handed Maces", "Two-Handed Maces", "One-Handed Axes", "Two-Handed Axes", "Staves", "Bows", "Guns", "Crossbows" }
+    CreateDropdownMenu(content, "|cFF00FF00All Weapons|r", 15, -240, cCfg, "bulkWeapons", "weapons")
+    local weaps = { 
+        "Daggers", "One-Handed Swords", "Two-Handed Swords", "One-Handed Maces", 
+        "Two-Handed Maces", "One-Handed Axes", "Two-Handed Axes", "Staves", 
+        "Bows", "Guns", "Crossbows", "Fist Weapons", "Polearms", "Wands" 
+    }
     for i, name in ipairs(weaps) do
-        local col = i <= 6 and 25 or 250 local row = i <= 6 and i or i - 6 local cleanLabel = name:gsub("One%-Handed ", "1H "):gsub("Two%-Handed ", "2H ")
-        CreateDropdownMenu(settingsFrame, cleanLabel, col, -295 - (row * 28), cCfg.weapons, name) 
+        local col = i <= 7 and 15 or 210 
+        local row = i <= 7 and i or i - 7 
+        local cleanLabel = name:gsub("One%-Handed ", "1H "):gsub("Two%-Handed ", "2H ")
+        CreateDropdownMenu(content, cleanLabel, col, -250 - (row * 28), cCfg.weapons, name) 
     end
     
-    -- Realignment: Moved explanation box lower by half the remaining bottom gap distance (14px)
     local helpBox = CreateFrame("Frame", nil, settingsFrame) 
     helpBox:SetSize(440, 195) 
-    helpBox:SetPoint("BOTTOM", settingsFrame, "BOTTOM", 0, 14)
+    helpBox:SetPoint("BOTTOM", settingsFrame, "BOTTOM", 0, 20)
     helpBox:SetBackdrop({ bgFile = "Interface\\ChatFrame\\ChatFrameBackground", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
     helpBox:SetBackdropColor(0, 0, 0, 0.6)
     
@@ -633,6 +847,9 @@ function BuildUI()
     local textLines = { "|cFFFFD100How AutoRoll Functions Internally:|r", "• Configured rule actions occur |cFFFFFFFFinstantly|r the exact millisecond a new item loot roll framework window prompt displays on your interface.", "• Setting an item type target rule value profile parameter to |cFFFF9900'Manual'|r completely prevents the script engine from interacting with it automatically, preserving regular item window selections.", "• |cFFFF2222CRITICAL SAFETY mechanism:|r If an item remains set to 'Manual' (or you decide to ignore a roll window while locked in heavy combat), the engine continuously tracks remaining frame timeout data.", "• When less than |cFFFFFFFF5 seconds|r remain on an ignored prompt, the fallback engine triggers an automatic |cFF00FF00Greed|r command selection so you never completely forfeit eligible group rewards." }
     helpText:SetText(table.concat(textLines, "\n"))
 end
+
+
+
 
 
 
@@ -735,34 +952,88 @@ local function InitializeAddon()
 end
 
 mainFrame:SetScript("OnEvent", function(self, event, arg1) 
-    if event == "ADDON_LOADED" and arg1 == "AutoRoll" then pcall(InitializeAddon) elseif event == "PLAYER_LOGIN" then pcall(InitializeAddon) elseif event == "START_LOOT_ROLL" then local rollID = arg1 local itemLink = GetLootRollItemLink(rollID) handledRolls[rollID] = false if itemLink then pcall(ProcessLootRoll, rollID, itemLink) end elseif event == "CANCEL_LOOT_ROLL" then handledRolls[arg1] = nil end 
+    if event == "ADDON_LOADED" and arg1 == "AutoRoll" then 
+        pcall(InitializeAddon) 
+    elseif event == "PLAYER_LOGIN" then 
+        pcall(InitializeAddon) 
+    elseif event == "START_LOOT_ROLL" then 
+        local rollID = arg1 
+        local itemLink = GetLootRollItemLink(rollID) 
+        handledRolls[rollID] = false 
+        
+        if itemLink then 
+            -- Resilient Retry Engine: If the custom server cache is slow to load item strings, retry rapidly
+            local itemName = GetItemInfo(itemLink)
+            if not itemName then
+                local retryFrame = CreateFrame("Frame")
+                local elapsed = 0
+                retryFrame:SetScript("OnUpdate", function(f, delta)
+                    elapsed = elapsed + delta
+                    -- Force a retry every 0.1 seconds up to a maximum of 2 seconds
+                    if GetItemInfo(itemLink) then
+                        pcall(ProcessLootRoll, rollID, itemLink)
+                        retryFrame:SetScript("OnUpdate", nil)
+                    elseif elapsed > 2.0 then
+                        -- Timeout safeguard: Fallback to manual interaction if item data is corrupt
+                        retryFrame:SetScript("OnUpdate", nil)
+                    end
+                end)
+            else
+                pcall(ProcessLootRoll, rollID, itemLink) 
+            end
+        end 
+    elseif event == "CANCEL_LOOT_ROLL" then 
+        handledRolls[arg1] = nil 
+    end 
 end)
+
 
 mainFrame:SetScript("OnUpdate", function(self, elapsed) 
     local charKey = GetCharacterUniqueKey()
     local cCfg = AutoRollConfig and AutoRollConfig.charSettings and AutoRollConfig.charSettings[charKey]
     if not cCfg or not cCfg.enabled then return end 
+    
+    -- Adaptive Scan Engine: Loops through all 4 active loot window slots on your interface
     for i = 1, 4 do 
         local rollFrame = _G["GroupLootFrame"..i] 
         if rollFrame and rollFrame:IsShown() then 
             local rollID = rollFrame.rollID 
+            
+            -- If this roll is currently active and waiting for a decision
             if rollID and handledRolls[rollID] == false then 
                 local statusBar = _G["GroupLootFrame"..i.."Timer"] 
                 if statusBar then 
                     local secondsLeft = statusBar:GetValue() / 1000 
+                    
+                    -- Safety Trigger: Executes when the progress bar ticks past your threshold (5 seconds)
                     if secondsLeft > 0 and secondsLeft <= cCfg.timeThreshold then 
-                        local itemLink = GetLootRollItemLink(rollID) local shouldFallback = true 
+                        local itemLink = GetLootRollItemLink(rollID) 
+                        local shouldFallback = true 
+                        
                         if itemLink then 
                             local _, _, _, _, _, itemType, itemSubClass = GetItemInfo(itemLink) 
-                            if (itemType == "Weapon" and cCfg.weapons and cCfg.weapons[itemSubClass] == 0) or ((itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor and cCfg.armor[itemSubClass] == 0) then shouldFallback = false end 
+                            -- If item type is set to Manual, we skip auto-greeding it early
+                            if (itemType == "Weapon" and cCfg.weapons and cCfg.weapons[itemSubClass] == 0) or ((itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor and cCfg.armor[itemSubClass] == 0) then 
+                                shouldFallback = false 
+                            end 
                         end 
-                        if shouldFallback then handledRolls[rollID] = true RollOnLoot(rollID, 2) CloseActiveLootFrame(rollID) if alertTextString then alertTextString:SetText("") end end 
+                        
+                        if shouldFallback then 
+                            handledRolls[rollID] = true 
+                            -- Executes a direct programmatic roll choice (2 = Greed) straight to the server
+                            RollOnLoot(rollID, 2) 
+                            
+                            -- Adaptive Visual Cleanup: Safely closes the specific active frame slot window
+                            rollFrame:Hide()
+                            if alertTextString then alertTextString:SetText("") end 
+                        end 
                     end 
                 end 
             end 
         end 
     end 
 end)
+
 
 SLASH_AUTOROLL1 = "/autoroll" SlashCmdList["AUTOROLL"] = function() ToggleUI() end
 
@@ -782,17 +1053,17 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         
         local playerClass = GetPlayerClassProfile()
         
-                -- 1. Calculate the flat total score of the targeted inventory item
+                -- 1. Calculate and log the flat total score of the targeted inventory item
         local totalDroppedScore = 0
         for i = 1, self:NumLines() do
             local leftLine = _G[self:GetName() .. "TextLeft" .. i]
-            if leftLine then
-                local text = leftLine:GetText()
-                if text then
-                    -- Set Bonus Shield: Bypasses line logging completely for set benchmarks
-                    if string.find(text, "Set:") or string.find(text, "%(%d+%)%s*Set") then
-                        -- Ignores text row
-                    else
+            local rawText = leftLine and leftLine:GetText() or ""
+            if rawText ~= "" then
+                if string.find(rawText, "Set:") or string.find(rawText, "%(%d+%)%s*Set") then
+                    -- Ignore set bonuses
+                else
+                    -- Smart Multi-Line Splitter loop for live chat log text streams
+                    for text in string.gmatch(rawText, "[^\r\n]+") do
                         local lineMatched = false
                         for _, item in ipairs(STAT_PATTERNS) do
                             local weight = 0
@@ -800,35 +1071,55 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                                 weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
                             end
                             
-                            for _, pattern in ipairs(item.pats) do
-                                local match = string.match(text, pattern)
+                            local cleanPat = nil
+                            if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
+                            elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
+                            elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
+                            elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
+                            elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
+                            end
+                            
+                            if cleanPat then
+                                local match = string.match(text, cleanPat)
                                 if match then
                                     local value = tonumber(match) or 0
                                     local lineScore = value * weight
                                     totalDroppedScore = totalDroppedScore + lineScore
-                                    lineMatched = true
                                     DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
                                     break
+                                end
+                            else
+                                for _, pattern in ipairs(item.pats) do
+                                    local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
+                                    local match = string.match(text, cleanPattern)
+                                    if match then
+                                        local value = tonumber(match) or 0
+                                        local lineScore = value * weight
+                                        totalDroppedScore = totalDroppedScore + lineScore
+                                        lineMatched = true
+                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
+                                        break
+                                    end
                                 end
                             end
                             if lineMatched then break end
                         end
-                    end -- End of Set Shield check
+                    end
                 end
             end
         end
 
-        
-                -- 2. Fortified Character Slot Detector adapted for Conquest of Azeroth
-        local equippedScore = 0
-        local equippedItemLink = nil
-        local foundSlotID = nil
 
-                -- A. Handle explicit weapon/shield/off-hand slots with priority pairing logic
-        -- Smart Filter: If the item subclass is a core armor type (Cloth, Leather, Mail, Plate), it is FORCED to skip weapon logic!
+        
+                 -- 2. Smart Weapon-Pairing Engine & Explicit Line Log Scanner
+        local equippedScore = 0
+        local equippedItemLink = "Slot Combo"
+        local foundSlotID = nil
+        
+        local isWeaponSlot = (itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_2HWEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemType == "Weapon" or itemSubClass == "Shields")
         local isCoreArmor = (itemSubClass == "Cloth" or itemSubClass == "Leather" or itemSubClass == "Mail" or itemSubClass == "Plate")
         
-        if not isCoreArmor and (itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemType == "Weapon") then
+        if not isCoreArmor and isWeaponSlot then
             local mhLink = GetInventoryItemLink("player", 16)
             local ohLink = GetInventoryItemLink("player", 17)
             
@@ -838,20 +1129,103 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             equippedScore = mhScore + ohScore
             equippedItemLink = string.format("MH: %s + OH: %s", mhLink or "[Empty]", ohLink or "[Empty]")
             
-            if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or string.find(string.lower(itemEquipLoc or ""), "main") then
+            -- Explicit Live Scan: Dissects and prints out your Main-Hand attributes cleanly
+            if mhLink and mhScore > 0 then
+                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Main-Hand Stats...]|r")
+                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+                scannerTooltip:ClearLines()
+                scannerTooltip:SetHyperlink(mhLink)
+                for i = 1, scannerTooltip:NumLines() do
+                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+                    local rTxt = lLine and lLine:GetText() or ""
+                    if rTxt ~= "" and not string.find(rTxt, "Set:") and not string.find(rTxt, "%(%d+%)%s*Set") then
+                        for text in string.gmatch(rTxt, "[^\r\n]+") do
+                            for _, item in ipairs(STAT_PATTERNS) do
+                                local w = (AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] and AutoRollConfig.classProfiles[playerClass][item.key]) or 0
+                                local cleanPat = nil
+                                if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
+                                elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
+                                elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
+                                elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
+                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
+                                end
+                                
+                                if cleanPat then
+                                    local m = string.match(text, cleanPat)
+                                    if m then
+                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
+                                        break
+                                    end
+                                else
+                                    for _, pattern in ipairs(item.pats) do
+                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
+                                        local m = string.match(text, cleanPattern)
+                                        if m then
+                                            DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+                    -- Explicit Live Scan: Dissects and prints out your multi-line Shield attributes perfectly!
+            if ohLink and ohScore > 0 then
+                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Off-Hand/Shield Stats...]|r")
+                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+                scannerTooltip:ClearLines()
+                scannerTooltip:SetHyperlink(ohLink)
+                for i = 1, scannerTooltip:NumLines() do
+                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+                    local rTxt = lLine and lLine:GetText() or ""
+                    if rTxt ~= "" and not string.find(rTxt, "Set:") and not string.find(rTxt, "%(%d+%)%s*Set") then
+                        for text in string.gmatch(rTxt, "[^\r\n]+") do
+                            for _, item in ipairs(STAT_PATTERNS) do
+                                local w = (AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] and AutoRollConfig.classProfiles[playerClass][item.key]) or 0
+                                local cleanPat = nil
+                                if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
+                                elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
+                                elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
+                                elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
+                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
+                                end
+                                
+                                if cleanPat then
+                                    local m = string.match(text, cleanPat)
+                                    if m then
+                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
+                                        break
+                                    end
+                                else
+                                    for _, pattern in ipairs(item.pats) do
+                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
+                                        local m = string.match(text, cleanPattern)
+                                        if m then
+                                            DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            
+            -- Combine scores for comparison math constraints
+            if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" then
                 totalDroppedScore = totalDroppedScore + ohScore
-            elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or string.find(string.lower(itemEquipLoc or ""), "shield") or string.find(string.lower(itemEquipLoc or ""), "off") then
+            elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemSubClass == "Shields" then
                 totalDroppedScore = mhScore + totalDroppedScore
             end
-            foundSlotID = 16 -- Flag to skip standard armor check
+            foundSlotID = 16 -- Flag to skip generic armor checks
         end
-
-
-        -- B. Fallback Armor Check: If slot isn't found yet, read the tooltip text directly to identify armor slots!
+        
+        -- B. Fallback Armor & Accessory Checker Block
         if not foundSlotID then
-            local lowerLinkStr = string.lower(itemLink or "")
-            -- Primary text boundary loop scanning for explicit server gear strings
-            for i = 1, self:NumLines() do
+            for i = 2, self:NumLines() do
                 local leftLine = _G[self:GetName() .. "TextLeft" .. i]
                 local lineText = leftLine and leftLine:GetText() or ""
                 if lineText ~= "" then
@@ -864,29 +1238,43 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                     elseif string.find(lineText, "Feet") or string.find(lineText, "Boots") then foundSlotID = 8 break
                     elseif string.find(lineText, "Wrist") or string.find(lineText, "Bracers") then foundSlotID = 9 break
                     elseif string.find(lineText, "Hands") or string.find(lineText, "Gloves") or string.find(lineText, "Handwraps") or string.find(lineText, "Gauntlets") then foundSlotID = 10 break
-                    elseif string.find(lineText, "Finger") or string.find(lineText, "Ring") then foundSlotID = 11 break
+                    elseif lineText == "Finger" or string.find(lineText, "%sRing%s") or lineText == "Ring" then foundSlotID = 11 break
                     elseif string.find(lineText, "Trinket") then foundSlotID = 12 break
                     elseif string.find(lineText, "Back") or string.find(lineText, "Cloak") or string.find(lineText, "Cape") then foundSlotID = 15 break
                     end
                 end
             end
             
-            -- If text scanning fails, fall back to our SLOT_MAP configuration dictionary
             if not foundSlotID and itemEquipLoc and SLOT_MAP and SLOT_MAP[itemEquipLoc] then
                 foundSlotID = SLOT_MAP[itemEquipLoc]
             end
-
-            -- Execute the gear sheet query using the successfully isolated slot integer number
+            
             if foundSlotID then
-                local standardLink = GetInventoryItemLink("player", foundSlotID)
-                if standardLink then
-                    equippedScore = CalculateItemScore(standardLink)
-                    equippedItemLink = standardLink
+                if foundSlotID == 11 or itemEquipLoc == "INVTYPE_FINGER" then
+                    local r1Link = GetInventoryItemLink("player", 11)
+                    local r2Link = GetInventoryItemLink("player", 12)
+                    local s1 = r1Link and CalculateItemScore(r1Link) or 0
+                    local s2 = r2Link and CalculateItemScore(r2Link) or 0
+                    equippedScore = math.min(s1, s2)
+                    equippedItemLink = string.format("\n    Slot 1: %s (Score: %.2f)\n    Slot 2: %s (Score: %.2f)\n    [Challenging Lowest]", r1Link or "[Empty]", s1, r2Link or "[Empty]", s2)
+                elseif foundSlotID == 12 or itemEquipLoc == "INVTYPE_TRINKET" then
+                    local t1Link = GetInventoryItemLink("player", 13)
+                    local t2Link = GetInventoryItemLink("player", 14)
+                    local s1 = t1Link and CalculateItemScore(t1Link) or 0
+                    local s2 = t2Link and CalculateItemScore(t2Link) or 0
+                    equippedScore = math.min(s1, s2)
+                    equippedItemLink = string.format("\n    Slot 1: %s (Score: %.2f)\n    Slot 2: %s (Score: %.2f)\n    [Challenging Lowest]", t1Link or "[Empty]", s1, t2Link or "[Empty]", s2)
+                else
+                    local standardLink = GetInventoryItemLink("player", foundSlotID)
+                    if standardLink then
+                        equippedScore = CalculateItemScore(standardLink)
+                        equippedItemLink = standardLink
+                    end
                 end
             end
         end
 
-        
+
         -- 3. Print the comprehensive dual-score mathematical evaluation to chat
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[Target Item Score]:|r %.2f", totalDroppedScore))
         if equippedItemLink then
@@ -903,3 +1291,96 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r")
     end
 end)
+
+
+local debugLogFrame = nil
+local debugEditBox = nil
+
+function ShowInGameDebugLog(itemLink)
+    if not itemLink then return end
+    local playerClass = GetPlayerClassProfile()
+    
+    -- Construct the copy-paste diagnostic window layout if it doesn't exist
+    if not debugLogFrame then
+        debugLogFrame = CreateFrame("Frame", "AutoRollDebugLogFrame", UIParent)
+        debugLogFrame:SetSize(460, 420)
+        debugLogFrame:SetPoint("CENTER")
+        debugLogFrame:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 5, right = 5, top = 5, bottom = 5 } })
+        debugLogFrame:SetMovable(true) debugLogFrame:EnableMouse(true) debugLogFrame:RegisterForDrag("LeftButton")
+        debugLogFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        debugLogFrame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        
+        local t = debugLogFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        t:SetPoint("TOP", 0, -15) t:SetText("|cFFFF9900AutoRoll Copyable Diagnostic Inspector|r")
+        
+        local close = CreateFrame("Button", nil, debugLogFrame, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -2, -2)
+        
+        -- Interactive Scroll Pane Wrapper Container
+        local sf = CreateFrame("ScrollFrame", "AutoRollDebugScroll", debugLogFrame, "UIPanelScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT", 15, -45) sf:SetPoint("BOTTOMRIGHT", -35, 45)
+        
+        local c = CreateFrame("Frame", nil, sf)
+        c:SetWidth(380) c:SetHeight(1200)
+        sf:SetScrollChild(c)
+        
+        -- Multi-Line Input Box modified into a selectable read-only layout block
+        debugEditBox = CreateFrame("EditBox", nil, c)
+        debugEditBox:SetWidth(370)
+        debugEditBox:SetHeight(1200)
+        debugEditBox:SetMultiLine(true)
+        debugEditBox:SetMaxLetters(99999)
+        debugEditBox:SetFontObject("GameFontHighlightSmall")
+        debugEditBox:SetPoint("TOPLEFT", c, "TOPLEFT", 5, -5)
+        debugEditBox:SetAutoFocus(false)
+        
+        -- Safety: Prevents normal keyboard typing from accidentally overwriting your text data
+        debugEditBox:SetScript("OnEscapePressed", function(self) debugLogFrame:Hide() end)
+        
+        -- Quick-Instruction footer tip bar
+        local footer = debugLogFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+        footer:SetPoint("BOTTOM", debugLogFrame, "BOTTOM", 0, 18)
+        footer:SetText("|cFF999999Click inside -> Press Ctrl+A -> Press Ctrl+C to Copy|r")
+    end
+    
+    debugLogFrame:Show()
+    
+    -- Extract raw text data rows straight out of the item container tooltip
+    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scannerTooltip:ClearLines()
+    scannerTooltip:SetHyperlink(itemLink)
+    
+    local linesOutput = {}
+    table.insert(linesOutput, "Item Link: " .. tostring(itemLink))
+    table.insert(linesOutput, "Class: " .. tostring(playerClass))
+    table.insert(linesOutput, "---------------------------------------------")
+    
+    for i = 1, scannerTooltip:NumLines() do
+        local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+        if leftLine then
+            local text = leftLine:GetText() or ""
+            if text ~= "" then
+                -- Strips color tags inside the text block copy-field to keep logs clean and readable
+                local cleanText = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+                table.insert(linesOutput, string.format("Line %d: \"%s\"", i, cleanText))
+            end
+        end
+    end
+    
+    -- Populates the copy-paste box canvas frame and highlights the text cursor
+    debugEditBox:SetText(table.concat(linesOutput, "\r\n"))
+    debugEditBox:SetFocus()
+    debugEditBox:HighlightText()
+    
+    scannerTooltip:Hide()
+end
+
+SLASH_ARCHECK1 = "/archeck"
+SlashCmdList["ARCHECK"] = function(msg)
+    if msg and msg ~= "" then
+        ShowInGameDebugLog(msg)
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[AutoRoll]|r Please type /archeck followed by an item link (Shift-Click an item) to copy its data!")
+    end
+end
+
