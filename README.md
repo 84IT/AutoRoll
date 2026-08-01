@@ -6,6 +6,41 @@ The addon strips away manual looting clutter by executing programmatic loot deci
 
 ---
 
+## 💾 Installation Instructions
+
+To ensure the World of Warcraft game client securely indexes the addon and prevents silent file architecture loading errors, follow these exact directory placement steps:
+
+### 1. Download & Extract
+* Download the project zip archive to your desktop.
+* Extract/unzip the contents using a tool like WinRAR, 7-Zip, or your native OS extractor.
+
+### 2. Rename the Folder (Critical)
+* The extraction tool will generate a directory folder named something generic like `AutoRoll-main` or `AutoRoll-2.0`.
+* **You must rename this folder exactly to:** `AutoRoll`
+* *Note: If the folder name contains hyphens, version numbers, or trailing characters, the game client will completely fail to load your settings.*
+
+### 3. Verify Folder Contents
+Double-click your newly renamed `AutoRoll` folder. Ensure that the core project files are sitting directly inside it without being nested inside secondary sub-folders. The contents must look exactly like this:
+```text
+AutoRoll \
+  ├── Profiles.lua
+  ├── AutoRoll.lua
+  ├── AutoRoll.toc
+  └── README.md
+```
+
+### 4. Move to WoW Directory
+Cut or copy your completed `AutoRoll` folder and paste it straight into your active game client installation directory path:
+`World of Warcraft \ Interface \ AddOns \`
+
+### 5. Load the Addon
+* Launch your World of Warcraft client and log into your character select screen.
+* Click the **AddOns** button in the bottom-left corner.
+* Ensure **AutoRoll** is checked `[✓]` and enabled in your active listings table.
+* Enter the world, type `/autoroll` into your chat box, and hit Enter to pull up your dashboard configuration layout panel!
+
+---
+
 ## 🚀 Key Mechanical Engineering Features
 
 ### 1. Multi-Column Tooltip Splitting Engine
