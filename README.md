@@ -1,4 +1,4 @@
-# AutoRoll v2.7
+# AutoRoll v3.1
 
 AutoRoll is an ultra-lightweight, event-driven automatic loot evaluation and rolling suite engineered specifically for World of Warcraft private server frameworks (optimized for the *Conquest of Azeroth* / *Ascension* Vanilla/TBC client layout). 
 
@@ -43,18 +43,23 @@ Cut or copy your completed `AutoRoll` folder and paste it straight into your act
 
 ## 🚀 Key Mechanical Engineering Features
 
-### 1. Multi-Column Tooltip Splitting Engine
+### 1. Realigned Matrix Execution Stream
+To completely safeguard usable gear upgrades from being swept away by general color automation, AutoRoll v3.0+ shifts specific inventory configurations and stat calculations *above* rarity filters. Items pass through an advanced hierarchy stream:
+- **Priority 0:** Usable Unknown Recipes (Auto-Need Interceptor)
+- **Priority 1-2:** Specific Armor Class & Weapon Type Dropdowns
+- **Priority 3:** Smart Stats Module Point Upgrade Check
+- **Priority 4:** Hard Block Usability Scanner (Plate/Relic Exclusion)
+- **Priority 5:** Universal Rarity Quality Color Sweep (Final Cleanup Fallback)
+
+### 2. Multi-Column Tooltip Splitting Engine
 Standard WoW addons parse text strings line-by-line using a single column template. This addon deploys a dual-column scanner (`TextLeft` and `TextRight`) paired with a dynamic string-gmatch row splitter. This allows AutoRoll to cleanly parse compressed private server formatting loops, separating squished attributes (e.g., `+10 Intellect\n+10 Spell Power`) and tracking floating right-hand alignment fields like weapon `Crossbow` types and attack `Speed` metrics flawlessly.
 
-### 2. Smart Weapon-Pairing & Multi-Slot Comparison Math
-* **Rings & Trinkets:** AutoRoll features an asymmetric multi-slot rule engine. When a ring or trinket drops, the addon queries both equipped gear positions simultaneously, locks onto whichever item carries the absolute lowest stat value score as a baseline challenge, and evaluates the dropped item against your weakest link.
-* **Dual-Wield vs. 2-Handers:** When evaluating weapons, the engine automatically calculates your combined Main-Hand and Off-Hand/Shield scores, allowing you to accurately measure whether a massive 2-Handed staff or polearm actually beats your currently equipped dagger-and-shield combo profiles.
+### 3. Asymmetric Multi-Slot & Pairing Logic
+* **Rings & Trinkets:** Queries both equipped gear positions simultaneously, locks onto whichever item carries the absolute lowest stat value score as a baseline challenge, and evaluates the dropped item against your weakest link.
+* **Dual-Wield vs. 2-Handers:** Automatically calculates your combined Main-Hand and Off-Hand/Shield scores, enabling accurate measurements of whether a massive 2-Handed weapon actually beats your current dagger-and-shield setup.
 
-### 3. Hardcoded Class Restriction Shield
-To completely eliminate false-positive upgrade claims on unwearable gear classes, AutoRoll features an ironclad restriction interceptor. The script natively maps your class profiles to immediately block armor types and weapon subclasses your character sheet cannot physically wear (e.g., locking out `Fist Weapons`, `Librams`, `Idols`, and `Totems` for Tinkers).
-
-### 4. Priority Zero Automated Recipe Sniper
-AutoRoll includes an elite profession scanning loop. By natively cross-referencing tooltip requirement data strings straight against your active tradeskill spellbook layout arrays, it can instantly spot the difference between junk recipes and missing formulas. If a completely unlearned, usable recipe drops, the addon intercepts your rarity filters and triggers an immediate automated **Need** command completely hands-free.
+### 4. Prefix Anchor Shield
+Prevents multiline set-text arrays from triggering accidental false color evaluations. The engine compiles an explicit string anchor check (`^`) that forces the color reader to validate only the first 10 characters at the absolute beginning of an item link, guaranteeing multi-drop safety during raid loot sweeps.
 
 ---
 
