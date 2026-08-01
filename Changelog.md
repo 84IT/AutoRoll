@@ -1,6 +1,24 @@
-# Changelog - AutoRoll 2.7
+# Changelog - AutoRoll 3.1
 
 All notable changes, structural logic corrections, and interface optimization updates to the AutoRoll addon project are documented in this file.
+
+---
+
+## [3.1] - Fallback Security Release
+
+### Added
+- **Absolute Manual Exit Shield:** Upgraded Priority Five with an ironclad return barrier. If a specific item rarity is set to `Manual (0)`, the script immediately stops execution and freezes the loot window open, permanently preventing uncategorized items (like Cloaks or Off-Hands) from falling through empty bulk variables into accidental auto-greeds.
+
+### Changed
+- **Addon Layout Version Stamp:** Advanced visual identification header to `v3.1 Stable Build`.
+
+---
+
+## [3.0] - Architecture Matrix Overhaul
+
+### Changed
+- **Structural Reordering Engine:** inverted the master execution core. Specific weapon slots, armor classes, and your Smart Stats Upgrade Module are now calculated *above* quality filters, allowing the script to catch upgrades before broad color rules can roll greed on them.
+- **Rarity Prefix Anchor Filter:** Redesigned the color regex scanner using explicit prefix string markers (`^`). The loop now examines strictly the absolute start of an item link, making the addon 100% immune to false color matches triggered by uncollected set text lines (e.g., *Vestments of the Devout* text lines).
 
 ---
 
@@ -12,17 +30,3 @@ All notable changes, structural logic corrections, and interface optimization up
 
 ### Fixed
 - **GetProfessions Nil API Crash:** Patched a severe client crash on Vanilla/TBC private server engine architectures by swapping out the modern `GetProfessions()` global API call for a completely backward-compatible spellbook loop (`GetSpellName`), restoring flawless recipe parsing without errors.
-
----
-
-## [2.5] - Profession & Interface Revision
-
-### Added
-- **Priority Zero Recipe Sniper:** Developed an advanced profession interceptor loop that analyzes tooltips to automatically execute **Need** rolls on completely unlearned, usable recipes while letting known duplicates pass safely to gold-farming settings.
-- **Mechanical Cogwheel Dashboard Tool:** Integrated a high-definition engineering gear button next to the help layout block, executing a real-time configuration audit straight to your chat log window to catch duplicate options or double-caching visual bugs.
-- **Addon Layout Version Stamp:** Implemented a localized version layout stamp (`v2.5+`) right below the character configuration name to establish title tracking density.
-
-### Changed
-- **Strict Quality Filter Anchors:** Optimized the Priority One rarity logic checks to enforce an ironclad barrier whenever a quality tier is set to `Manual (0)`, preventing bulk overrides from accidentally auto-greeding premium gear options.
-- **Adaptive Regex Pattern Matching:** Re-engineered the core stat capture parameters to search globally anywhere across line rows, allowing the script to cleanly catch Haste properties across separate client-side layout syntaxes (e.g., matching both `+X Haste Rating` and `Improves haste rating by X`).
-- **Ranged Option Granularity:** Re-separated the wide missile weapon track back into explicit individual columns for `Guns`, `Bows`, `Crossbows`, and `Thrown` items to match precise character proficiency rules.
