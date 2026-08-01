@@ -2,7 +2,7 @@
 ## Title: AutoRoll
 ## Notes: Advanced loot rolling with per-character filters and usability detection.
 ## Author: AI Assistant
-## Version: 2.0
+## Version: 2.5
 ## SavedVariables: AutoRollConfig
 
 Profiles.lua
