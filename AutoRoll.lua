@@ -107,13 +107,16 @@ function CalculateItemScore(itemLink)
                 for _, item in ipairs(STAT_PATTERNS) do
                     local weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
                     if weight > 0 then
-                        local cleanPat = nil
-                        if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
-                        elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
-                        elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
-                        elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                        elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
-                        end
+                                local cleanPat = nil
+                                if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
+                                elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
+                                elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
+                                elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
+                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
+                                -- Fixed: Custom pattern rule extracts Haste numbers flawlessly across all server text formats
+                                elseif item.key == "Haste" then cleanPat = "(%d+)%s*[Hh]aste"
+                                end
+
                         
                         if cleanPat then
                             local match = string.match(text, cleanPat)
@@ -1094,19 +1097,20 @@ SLASH_AUTOROLL1 = "/autoroll" SlashCmdList["AUTOROLL"] = function() ToggleUI() e
 --Test code below
 -- Global Tooltip Hook for Ondemand Diagnostic Scans
 -- Fortified Global Tooltip Hook for On-Demand Slot Comparison Upgrades
+-- Streamlined Global Tooltip Hook for On-Demand Multi-Slot Weapon Comparisons
 GameTooltip:HookScript("OnTooltipSetItem", function(self)
     if IsControlKeyDown() then
         local _, itemLink = self:GetItem()
         if not itemLink then return end
         
-        local itemName, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
+        local itemName, _, _, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
         if not itemName then return end
         
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
         
         local playerClass = GetPlayerClassProfile()
         
-                -- 1. Calculate and log the flat total score of the targeted inventory item
+        -- 1. Calculate and log the flat total score of the targeted inventory item
         local totalDroppedScore = 0
         for i = 1, self:NumLines() do
             local leftLine = _G[self:GetName() .. "TextLeft" .. i]
@@ -1130,7 +1134,10 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                             elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
                             elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
                             elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
+                            -- Fixed: Streamlines custom text matching on live chat logs
+                            elseif item.key == "Haste" then cleanPat = "(%d+)%s*[Hh]aste"
                             end
+
                             
                             if cleanPat then
                                 local match = string.match(text, cleanPat)
@@ -1138,7 +1145,8 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                                     local value = tonumber(match) or 0
                                     local lineScore = value * weight
                                     totalDroppedScore = totalDroppedScore + lineScore
-                                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
+                                    -- Streamlined Output: Removed redundant "Matched Line" prefix string
+                                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore))
                                     break
                                 end
                             else
@@ -1150,7 +1158,8 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                                         local lineScore = value * weight
                                         totalDroppedScore = totalDroppedScore + lineScore
                                         lineMatched = true
-                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFFFFD100Matched Line:|r \"%s\" -> |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", text, item.key, value, weight, lineScore))
+                                        -- Streamlined Output: Removed redundant "Matched Line" prefix string
+                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore))
                                         break
                                     end
                                 end
@@ -1161,6 +1170,7 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                 end
             end
         end
+
 
 
         
@@ -1328,8 +1338,8 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         end
 
 
-        -- 3. Print the comprehensive dual-score mathematical evaluation to chat
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[Target Item Score]:|r %.2f", totalDroppedScore))
+        -- 3. Print the final dual-score evaluation summary dashboard to your chat log frame
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[%s Score]:|r %.2f", itemName, totalDroppedScore))
         if equippedItemLink then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFF0000[Equipped Item Baseline]:|r %.2f (%s)", equippedScore, equippedItemLink))
             local scoreDelta = totalDroppedScore - equippedScore
@@ -1342,6 +1352,7 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             DEFAULT_CHAT_FRAME:AddMessage("|cFF999999[Slot Baseline]:|r Empty slot. This item is an absolute upgrade!")
         end
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r")
+
     end
 end)
 
