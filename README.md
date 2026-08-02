@@ -1,4 +1,4 @@
-# AutoRoll v3.1
+# AutoRoll v3.2
 
 AutoRoll is an ultra-lightweight, event-driven automatic loot evaluation and rolling suite engineered specifically for World of Warcraft private server frameworks (optimized for the *Conquest of Azeroth* / *Ascension* Vanilla/TBC client layout). 
 
