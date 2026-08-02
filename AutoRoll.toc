@@ -1,9 +1,8 @@
 ## Interface: 30300
 ## Title: AutoRoll
-## Notes: Advanced loot rolling with per-character filters and usability detection.
-## Author: AI Assistant
-## Version: 2.5
+## Notes: Automated loot suite optimized for Conquest of Azeroth.
 ## SavedVariables: AutoRollConfig
 
 Profiles.lua
-AutoRoll.lua
+EngineCore.lua
+InterfaceGUI.lua
