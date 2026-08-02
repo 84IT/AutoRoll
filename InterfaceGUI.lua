@@ -1,15 +1,9 @@
--- Cross-File Scope Mapping: Connects shared variable handles cleanly across our separate file sheets
+-- =========================================================================
+-- AUTOROLL SYSTEM HUD - INTERFACEGUI.LUA (PANELS, HOVER HOOKS & CMDS)
+-- =========================================================================
+-- Links your variables to the global engine core registry
 scannerTooltip = _G.scannerTooltip or scannerTooltip
 
--- Cross-File Usability Link: Pulls your modular dual-column color engine straight into your hover panels
-function IsItemUnusable(itemLink)
-    if _G.IsItemUnusable then return _G.IsItemUnusable(itemLink) end
-    return false, "StandardGear"
-end
-
--- =========================================================================
--- AUTOROLL MODULAR CORE - INTERFACEGUI.LUA (PANELS, HOVER HANDLERS & CMDS)
--- =========================================================================
 local dropdownCounter = 0
 
 function ForcePanelVisualSync()
@@ -449,16 +443,15 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         local _, itemLink = self:GetItem() if not itemLink then return end
         local itemName, _, _, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink) if not itemName then return end
         
-        -- =========================================================================
-        -- HOVER HOOK SHIELD: Halts calculation pipelines on classes you cannot wear
+                -- =========================================================================
+        -- HOVER HOOK SHIELD: Queries your modular cross-file dual column color engine live
         -- =========================================================================
         local isUnusableClassGear = false
-        if itemType == "Weapon" then
-            local lowerSub = string.lower(itemSubClass or "")
-            if lowerSub == "crossbow" or lowerSub == "crossbows" or lowerSub == "bows" or lowerSub == "bow" or lowerSub == "fist weapon" or lowerSub == "fist weapons" or string.find(lowerSub, "fist") then isUnusableClassGear = true end
-        elseif itemType == "Armor" then
-            local lowerSub = string.lower(itemSubClass or "")
-            if lowerSub == "librams" or lowerSub == "idols" or lowerSub == "totems" or string.find(lowerSub, "libram") or string.find(lowerSub, "idol") or string.find(lowerSub, "totem") then isUnusableClassGear = true end
+        if _G.IsItemUnusable then
+            local checkState, token = _G.IsItemUnusable(itemLink)
+            if checkState == true then
+                isUnusableClassGear = true
+            end
         end
         
         if isUnusableClassGear then
@@ -467,6 +460,7 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r")
             return
         end
+
         
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
         local playerClass = GetPlayerClassProfile() local totalDroppedScore = 0
