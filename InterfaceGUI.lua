@@ -283,6 +283,13 @@ function BuildUI()
     title:SetText("AutoRoll Settings: " .. UnitName("player"))
     title:SetJustifyH("LEFT")
     
+    -- Visual Identity Header: Positioned cleanly right underneath the main title string label
+    local versionText = settingsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    versionText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4) -- Snaps to the bottom left edge of title
+    versionText:SetText("|cFF999999v3.1 Stable Build|r")
+
+
+    
     local close = CreateFrame("Button", nil, settingsFrame, "UIPanelCloseButton") 
     close:SetPoint("TOPRIGHT", -6, -6)
     close:SetScript("OnClick", function() settingsFrame:Hide() if statFrame then statFrame:Hide() end if weightFrame then weightFrame:Hide() end end)
