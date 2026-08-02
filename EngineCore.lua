@@ -125,78 +125,52 @@ function ProcessLootRoll(rollID, itemLink)
     local playerClass = GetPlayerClassProfile()
     local itemName, _, itemRarity, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     if not itemName then return end
+    
     local rarityKey = nil
     if itemRarity == 2 then rarityKey = "Green" elseif itemRarity == 3 then rarityKey = "Blue" elseif itemRarity == 4 then rarityKey = "Purple" end
-        -- =========================================================================
-    -- RECIPE INTERCEPTOR: Snipes unlearned tradeskill formulas before generic filters sweep them
-    -- =========================================================================
-    local isRecipeItem = (itemType == "Recipe")
-    local isUnusable, recipeState = false, "StandardGear"
-    if isRecipeItem then
-        isUnusable, recipeState = IsItemUnusable(itemLink)
-    end
-    
-    if isRecipeItem and recipeState == "UnknownUsableRecipe" then
-        if alertTextString then alertTextString:SetText("|cFF3399FFRecipe Sniper: NEED|r") end
-        if ExecuteRollChoice(rollID, 1, itemLink, "Unknown Usable Tradeskill Blueprints") then
-            return 
-        end
-    end
-
     if not rarityKey and itemLink then
         if string.find(itemLink, "|cff1eff00") then rarityKey = "Green"
         elseif string.find(itemLink, "|cff0070dd") or string.find(itemLink, "|cff0070d8") then rarityKey = "Blue"
         elseif string.find(itemLink, "|ffa335ee") then rarityKey = "Purple" end
     end
-    if itemType == "Weapon" then
-        local lowerSub = string.lower(itemSubClass or "") local lowerEquip = string.lower(itemEquipLoc or "") local lowerName = string.lower(itemName or "") local isolatedSubClass = nil
-        for i = 1, scannerTooltip:NumLines() do
-            local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
-            local rightLine = _G["AutoRollScannerTooltipTextRight" .. i]
-            
-            if leftLine then
-                local text = leftLine:GetText() or "" local r, g, b = leftLine:GetTextColor()
-                if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
-                    if not string.find(string.lower(text), "level") and not string.find(string.lower(text), "requires") then unusable = true break end
-                end
-                if text ~= "" and not isRecipeItem then
-                    local lowerText = string.lower(text)
-                    if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true break
-                    elseif string.find(lowerText, "can't equip") or string.find(lowerText, "cannot equip") then unusable = true break end
-                end
-            end
-        
-            if rightLine then
-                local text = rightLine:GetText() or "" local r, g, b = rightLine:GetTextColor()
-                if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
-                    if not string.find(string.lower(text), "level") and not string.find(string.lower(text), "requires") then unusable = true break end
-                end
-                if text ~= "" and not isRecipeItem then
-                    local lowerText = string.lower(text)
-                    -- Hex Shield: Checks if the right column text string contains embedded red color formatting tags directly
-                    if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true break end
-                end
-            end
-        end
 
-        if not isolatedSubClass then
-            if string.find(lowerName, "gun") or string.find(lowerName, "rifle") or string.find(lowerName, "blunderbuss") or string.find(lowerName, "musket") then isolatedSubClass = "Guns"
-            elseif string.find(lowerName, "crossbow") then isolatedSubClass = "Crossbows"
-            elseif string.find(lowerName, "bow") or string.find(lowerName, "longbow") then isolatedSubClass = "Bows"
-            elseif string.find(lowerName, "thrown") or string.find(lowerName, "throwing") or string.find(lowerName, "hatchet") then isolatedSubClass = "Thrown" end
-        end
-        if isolatedSubClass then itemSubClass = isolatedSubClass end
+    -- =========================================================================
+    -- PRIORITY 0: RECIPE INTERCEPTOR (Always fires first on unknown formulas)
+    -- =========================================================================
+    local isRecipeItem = (itemType == "Recipe")
+    local isUnusable, recipeState = false, "StandardGear"
+    if isRecipeItem then isUnusable, recipeState = IsItemUnusable(itemLink) end
+    if isRecipeItem and recipeState == "UnknownUsableRecipe" then
+        if alertTextString then alertTextString:SetText("|cFF3399FFRecipe Sniper: NEED|r") end
+        if ExecuteRollChoice(rollID, 1, itemLink, "Unknown Usable Recipe") then return end
     end
-    if rarityKey and cCfg.quality then
-        local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
-        if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end end
-    end
-        -- 2. PRIORITY TWO: Catch-All Red Text Armor & Requirement Filter
+
+    -- =========================================================================
+    -- PRIORITY 1: HARD BLOCK USABILITY SHIELD (Instantly drops unwearable gear)
+    -- =========================================================================
     if not isRecipeItem then isUnusable = IsItemUnusable(itemLink) end
-    if cCfg.autoGreedUnusable and isUnusable then
-        if ExecuteRollChoice(rollID, 2, itemLink, "Unusable Red Text") then return end
+    if isUnusable then
+        -- Auto-greeds or passes unwearable gear immediately before analyzing any configuration stats
+        local fallbackAction = cCfg.autoGreedUnusable and 2 or 3
+        local fallbackReason = cCfg.autoGreedUnusable and "Unusable Greed Catch" or "Unusable Pass Exclusion"
+        if ExecuteRollChoice(rollID, fallbackAction, itemLink, fallbackReason) then return end
     end
 
+        -- =========================================================================
+    -- PRIORITY 2: SMART STATS UPGRADE TRACKER (Prioritizes item slot upgrades)
+    -- =========================================================================
+    if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
+        local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
+        local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
+        if droppedScore > equippedScore then 
+            if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
+            if ExecuteRollChoice(rollID, 1, itemLink, string.format("Upgrade Over Equipped: +%.2f Pts", droppedScore - equippedScore)) then return end
+        end
+    end
+
+    -- =========================================================================
+    -- PRIORITY 3: SPECIFIC TYPE OVERRIDES (Evaluates custom checkbox configurations)
+    -- =========================================================================
     if (itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor then
         local aChoice = 0 if cCfg.bulkArmor and cCfg.bulkArmor > 0 then aChoice = cCfg.bulkArmor else aChoice = cCfg.armor[itemSubClass] or 0 end
         if aChoice > 0 then if ExecuteRollChoice(rollID, aChoice, itemLink, "Armor Filter: " .. itemSubClass) then return end end
@@ -204,22 +178,23 @@ function ProcessLootRoll(rollID, itemLink)
     if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or itemSubClass == "Guns" or itemSubClass == "Bows" or itemSubClass == "Crossbows" or itemSubClass == "Thrown" then
         if cCfg.weapons and cCfg.weapons[itemSubClass] and cCfg.weapons[itemSubClass] > 0 then if ExecuteRollChoice(rollID, cCfg.weapons[itemSubClass], itemLink, "Weapon Auto Filter: " .. itemSubClass) then return end end
         local droppedScore = CalculateItemScore(itemLink)
-        if alertTextString then alertTextString:SetText("|cFFFFD100Weapon Dropped! Manual Choice Required|r") end
+        if alertTextString then alertTextString:SetText("|cFFFFD100Weapon dropped! Manual pause.|r") end
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore)) return 
     end
     if itemType == "Weapon" and cCfg.weapons then
         local wChoice = 0 if cCfg.bulkWeapons and cCfg.bulkWeapons > 0 then wChoice = cCfg.bulkWeapons else wChoice = cCfg.weapons[itemSubClass] or 0 end
         if wChoice > 0 then if ExecuteRollChoice(rollID, wChoice, itemLink, "Weapon Filter: " .. itemSubClass) then return end end
     end
-    if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
-        local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
-        local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
-        if droppedScore > equippedScore then 
-            if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[AutoRoll Alert]|r %s (|cFF00FF00Weight Score: %.2f|r) beats Equipped (|cFFFF0000Score: %.2f|r). Suggesting NEED!", itemLink, droppedScore, equippedScore))
-        end
+
+    -- =========================================================================
+    -- PRIORITY 4: UNIVERSAL QUALITY CLEANUP FALLBACK (Broad background cushion)
+    -- =========================================================================
+    if rarityKey and cCfg.quality then
+        local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
+        if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end end
     end
 end
+
 
 function IsItemUnusable(itemLink)
     if not itemLink then return false, "StandardGear" end
@@ -391,9 +366,21 @@ mainFrame:RegisterEvent("ADDON_LOADED") mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("START_LOOT_ROLL") mainFrame:RegisterEvent("CANCEL_LOOT_ROLL")
 mainFrame:SetScript("OnEvent", function(self, event, arg1) 
     if event == "ADDON_LOADED" and arg1 == "AutoRoll" then pcall(InitializeAddon) 
-    elseif event == "PLAYER_LOGIN" then pcall(InitializeAddon) 
-    elseif event == "PLAYER_LOGIN" or event == "SKILL_LINES_CHANGED" then pcall(InitializeAddon)
-
+    elseif event == "PLAYER_LOGIN" or event == "SKILL_LINES_CHANGED" then
+        if event == "PLAYER_LOGIN" then
+            -- Delayed Ignition Engine: Creates a clean 2-second buffer timer before booting core systems
+            local delayFrame = CreateFrame("Frame")
+            local totalElapsed = 0
+            delayFrame:SetScript("OnUpdate", function(f, delta)
+                totalElapsed = totalElapsed + delta
+                if totalElapsed >= 2.0 then
+                    pcall(InitializeAddon)
+                    delayFrame:SetScript("OnUpdate", nil) -- Disposes timer frame safely from memory
+                end
+            end)
+        else
+            pcall(InitializeAddon)
+        end
     elseif event == "START_LOOT_ROLL" then 
         local rollID = arg1 local itemLink = GetLootRollItemLink(rollID) handledRolls[rollID] = false 
         if itemLink then 
@@ -409,6 +396,7 @@ mainFrame:SetScript("OnEvent", function(self, event, arg1)
         end 
     elseif event == "CANCEL_LOOT_ROLL" then handledRolls[arg1] = nil end 
 end)
+
 
 -- =========================================================================
 -- SYSTEM SCANNER MODULE: Dynamically queries your native Skills Tab live

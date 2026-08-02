@@ -2,7 +2,7 @@
 
 AutoRoll is an ultra-lightweight, event-driven automatic loot evaluation and rolling suite engineered specifically for World of Warcraft private server frameworks (optimized for the *Conquest of Azeroth* / *Ascension* Vanilla/TBC client layout). 
 
-The addon strips away manual looting clutter by executing programmatic loot decisions (`Need`, `Greed`, `Pass`) the exact microsecond a loot window prompt rolls into view, backed by a robust 5-second safety timeout engine and a multi-dimensional real-time gear scoring matrix.
+The addon strips away manual looting clutter by executing programmatic loot decisions (`Need`, `Greed`, `Pass`) the exact microsecond a loot window prompt rolls into view, backed by a robust 5-second safety timeout engine, a 2-second login ignition shield, and a multi-dimensional real-time gear scoring matrix.
 
 ---
 
@@ -39,18 +39,29 @@ Cut or copy your completed `AutoRoll` folder and paste it straight into your act
 * Click the **AddOns** button in the bottom-left corner.
 * Ensure **AutoRoll** is checked `[✓]` and enabled in your active listings table.
 * Enter the world, type `/autoroll` into your chat box, and hit Enter to pull up your dashboard configuration layout panel!
+
 ---
 
 ## 🚀 Key Mechanical Engineering Features
 
-### 1. Realigned Matrix Execution Stream
-To completely safeguard usable gear upgrades from being swept away by general color automation, AutoRoll shifts specific inventory configurations and stat calculations *above* rarity filters. Items pass through an advanced hierarchy stream:
-- **Priority 0:** Usable Unknown Recipes (Auto-Need Interceptor)
-- **Priority 1-2:** Specific Armor Class & Weapon Type Dropdowns
-- **Priority 3:** Smart Stats Module Point Upgrade Check
-- **Priority 4:** Hard Block Usability Scanner (Plate/Relic Exclusion)
-- **Priority 5:** Universal Rarity Quality Color Sweep (Final Cleanup Fallback)
+### 1. Inverted Matrix Priority Stream
+To completely safeguard usable gear upgrades from being swept away by general color automation, AutoRoll v3.1 shifts specific inventory configurations, live skill validations, and stat calculations *above* rarity filters. Items pass through a strict top-to-bottom hierarchy stream:
 
+* **Priority 0 [The Interceptor]: Usable Unknown Recipes**
+  - Instantly scans spellbook data to detect unlearned profession formulas.
+  - Automatically executes a `NEED` command to secure the blueprint before general rules can apply.
+* **Priority 1 [The Safety Shield]: Hard Block Usability Scanner**
+  - Queries your character's live skills cache (Armor Proficiencies and Weapon Skills).
+  - Instantly drops unwearable gear (like Plate on a Tinker) using `GREED/PASS` rules before running math.
+* **Priority 2 [The Upgrade Tracker]: Smart Stats Module**
+  - Runs real-time calculations using your custom class-profile decimal weight matrix.
+  - Compares the item's score against your equipped gear baseline. If it's an upgrade, it rolls `NEED` immediately.
+* **Priority 3 [The Specific Override]: Individual Type Dropdowns**
+  - Evaluates your exact menu choices for individual sub-classes (e.g., Mail, Cloth, Daggers, Staves).
+  - Weapons carry a safety hard-stop that pauses automation for manual review if no specific dropdown rule is set.
+* **Priority 4 [The Cleanup Fallback]: Universal Quality Sweep**
+  - Fires only as a final safety cushion for items that didn't match any specific slot rules higher up.
+  - Applies broad background choices from your `Green`, `Blue`, and `Purple` dropdown settings.
 ### 2. Dynamic Server-Skills Synchronization Engine
 Dumps legacy color tracking. The addon queries the game's native skills database via `GetSkillLineInfo` to cache your character's real-time `Armor Proficiencies` and `Weapon Skills` lists. If an item drops that isn't in your cache (like Plate on a Tinker), it flags it unusable across all systems instantly.
 
