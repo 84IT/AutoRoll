@@ -286,7 +286,7 @@ function BuildUI()
     -- Visual Identity Header: Positioned cleanly right underneath the main title string label
     local versionText = settingsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     versionText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4) -- Snaps to the bottom left edge of title
-    versionText:SetText("|cFF999999v3.1 Stable Build|r")
+    versionText:SetText("|cFF999999v3.2 Stable Build|r")
 
 
     
