@@ -128,10 +128,14 @@ function ProcessLootRoll(rollID, itemLink)
     
     local rarityKey = nil
     if itemRarity == 2 then rarityKey = "Green" elseif itemRarity == 3 then rarityKey = "Blue" elseif itemRarity == 4 then rarityKey = "Purple" end
+    -- =========================================================================
+    -- PREFIX ANCHOR SHIELD: Prevents multiline set-text from triggering false values
+    -- =========================================================================
     if not rarityKey and itemLink then
-        if string.find(itemLink, "|cff1eff00") then rarityKey = "Green"
-        elseif string.find(itemLink, "|cff0070dd") or string.find(itemLink, "|cff0070d8") then rarityKey = "Blue"
-        elseif string.find(itemLink, "|ffa335ee") then rarityKey = "Purple" end
+        -- The '^' anchor restricts the pattern matching engine strictly to the start of strings
+        if string.match(itemLink, "^|cff1eff00") then rarityKey = "Green"
+        elseif string.match(itemLink, "^|cff0070dd") or string.match(itemLink, "^|cff0070d8") then rarityKey = "Blue"
+        elseif string.match(itemLink, "^|cffa335ee") then rarityKey = "Purple" end
     end
 
     -- =========================================================================
