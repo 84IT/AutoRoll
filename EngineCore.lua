@@ -430,12 +430,16 @@ function ScanCharacterSkillsEngine()
                 if string.find(lowName, "sword") then playerWeaponSkills["swords"] = true end
                 if string.find(lowName, "mace") then playerWeaponSkills["maces"] = true end
                 if string.find(lowName, "axe") then playerWeaponSkills["axes"] = true end
-                if string.find(lowName, "dagger") then playerWeaponSkills["daggers"] = true end
+                if string.find(lowName, "dagger") then 
+                    playerWeaponSkills["dagger"] = true 
+                    playerWeaponSkills["daggers"] = true 
+                end
                 if string.find(lowName, "staff") or string.find(lowName, "staves") then playerWeaponSkills["staves"] = true end
                 if string.find(lowName, "bow") then playerWeaponSkills["bows"] = true end
                 if string.find(lowName, "crossbow") then playerWeaponSkills["crossbows"] = true end
                 if string.find(lowName, "gun") then playerWeaponSkills["guns"] = true end
                 if string.find(lowName, "fist") then playerWeaponSkills["fist weapons"] = true end
+
             end
         end
     end
