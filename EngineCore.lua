@@ -186,38 +186,53 @@ function ProcessLootRoll(rollID, itemLink)
     end
 end
 
-
 function IsItemUnusable(itemLink)
-    if not itemLink then return false end
+    if not itemLink then return false, "StandardGear" end
     local _, _, _, _, _, itemType, itemSubClass = GetItemInfo(itemLink)
     if itemType == "Weapon" then
         local lowerSub = string.lower(itemSubClass or "")
-        if lowerSub == "crossbow" or lowerSub == "crossbows" or lowerSub == "bows" or lowerSub == "bow" then
-            return true
-        end
+        if lowerSub == "crossbow" or lowerSub == "crossbows" or lowerSub == "bows" or lowerSub == "bow" then return true, "StandardGear" end
     end
     scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(itemLink)
-    local unusable = false
+    local unusable, isRecipeItem, isAlreadyKnown, hasUnusableProfession = false, (itemType == "Recipe"), false, false
+    local myProfessions = {}
+    for i = 1, 100 do
+        local name = GetSpellName(i, "spell") if not name then break end
+        local lowerName = string.lower(name)
+        if string.find(lowerName, "alchemy") then myProfessions["alchemy"] = true
+        elseif string.find(lowerName, "blacksmithing") then myProfessions["blacksmithing"] = true
+        elseif string.find(lowerName, "leatherworking") then myProfessions["leatherworking"] = true
+        elseif string.find(lowerName, "tailoring") then myProfessions["tailoring"] = true
+        elseif string.find(lowerName, "engineering") then myProfessions["engineering"] = true
+        elseif string.find(lowerName, "enchanting") then myProfessions["enchanting"] = true
+        elseif string.find(lowerName, "jewelcrafting") then myProfessions["jewelcrafting"] = true
+        elseif string.find(lowerName, "cooking") then myProfessions["cooking"] = true
+        elseif string.find(lowerName, "first aid") then myProfessions["first aid"] = true end
+    end
     for i = 1, scannerTooltip:NumLines() do
         local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
         if leftLine then
-            local text = leftLine:GetText() or "" local r, g, b = leftLine:GetTextColor()
+            local text = leftLine:GetText() or "" local r, g, b = leftLine:GetTextColor() local lowerText = string.lower(text)
+            if isRecipeItem and (string.find(lowerText, "already known") or string.find(lowerText, "already learnt")) then isAlreadyKnown = true end
             if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
-                if not string.find(string.lower(text), "level") and not string.find(string.lower(text), "requires") then
-                    unusable = true break
-                end
+                if isRecipeItem then
+                    local foundMatchingOwnedProf = false
+                    for profName in pairs(myProfessions) do if string.find(lowerText, profName) then foundMatchingOwnedProf = true break end end
+                    if not foundMatchingOwnedProf and string.find(lowerText, "requires") then hasUnusableProfession = true end
+                elseif not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true end
             end
-            if text ~= "" then
-                local lowerText = string.lower(text)
-                if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then
-                    unusable = true break
-                elseif string.find(lowerText, "can't equip") or string.find(lowerText, "cannot equip") then
-                    unusable = true break
-                end
+            if text ~= "" and not isRecipeItem then
+                if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true
+                elseif string.find(lowerText, "can't equip") or string.find(lowerText, "cannot equip") then unusable = true end
             end
         end
     end
-    scannerTooltip:Hide() return unusable
+    scannerTooltip:Hide()
+    if isRecipeItem then
+        if isAlreadyKnown or hasUnusableProfession then return true, "KnownOrUnusableRecipe"
+        else return false, "UnknownUsableRecipe" end
+    end
+    return unusable, "StandardGear"
 end
 
 function CloseActiveLootFrame(rollID)
