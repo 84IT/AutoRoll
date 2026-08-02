@@ -1,7 +1,7 @@
 -- =========================================================================
 -- AUTOROLL MODULAR CORE - ENGINECORE.LUA (CALCULATIONS & LOOT LOGIC)
 -- =========================================================================
-handledRolls = {}
+handledRolls = handledRolls or {}
 alertTextString = nil
 settingsFrame, statFrame, weightFrame = nil, nil, nil
 tempWeights = {}
@@ -117,6 +117,76 @@ function CalculateItemScore(itemLink)
     scannerTooltip:Hide() return totalScore
 end
 
+function ProcessLootRoll(rollID, itemLink)
+    if not AutoRollConfig or not AutoRollConfig.charSettings then return end
+    local charKey = GetCharacterUniqueKey() local cCfg = AutoRollConfig.charSettings[charKey]
+    if not cCfg or not cCfg.enabled or handledRolls[rollID] then return end
+    local playerClass = GetPlayerClassProfile()
+    local itemName, _, itemRarity, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
+    if not itemName then return end
+    local rarityKey = nil
+    if itemRarity == 2 then rarityKey = "Green" elseif itemRarity == 3 then rarityKey = "Blue" elseif itemRarity == 4 then rarityKey = "Purple" end
+    if not rarityKey and itemLink then
+        if string.find(itemLink, "|cff1eff00") then rarityKey = "Green"
+        elseif string.find(itemLink, "|cff0070dd") or string.find(itemLink, "|cff0070d8") then rarityKey = "Blue"
+        elseif string.find(itemLink, "|ffa335ee") then rarityKey = "Purple" end
+    end
+    if itemType == "Weapon" then
+        local lowerSub = string.lower(itemSubClass or "") local lowerEquip = string.lower(itemEquipLoc or "") local lowerName = string.lower(itemName or "") local isolatedSubClass = nil
+        for i = 1, scannerTooltip:NumLines() do
+            local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i] local rightLine = _G["AutoRollScannerTooltipTextRight" .. i]
+            local leftText = leftLine and leftLine:GetText() or "" local rightText = rightLine and rightLine:GetText() or "" local combined = string.lower(leftText .. " " .. rightText)
+            if string.find(combined, "dagger") then isolatedSubClass = "Daggers" break
+            elseif string.find(combined, "staff") or string.find(combined, "staves") then isolatedSubClass = "Staves" break
+            elseif string.find(combined, "polearm") then isolatedSubClass = "Polearms" break
+            elseif string.find(combined, "wand") then isolatedSubClass = "Wands" break
+            elseif string.find(combined, "fist") or string.find(combined, "claw") or string.find(combined, "knuckles") then isolatedSubClass = "Fist Weapons" break
+            elseif string.find(combined, "gun") or string.find(combined, "rifle") or string.find(combined, "musket") or string.find(combined, "shotgun") then isolatedSubClass = "Guns" break
+            elseif string.find(combined, "crossbow") then isolatedSubClass = "Crossbows" break
+            elseif string.find(combined, "bow") then isolatedSubClass = "Bows" break
+            elseif string.find(combined, "thrown") or string.find(combined, "throwing") then isolatedSubClass = "Thrown" break
+            elseif string.find(combined, "mace") then isolatedSubClass = (string.find(lowerSub, "two") or string.find(combined, "2h")) and "Two-Handed Maces" or "One-Handed Maces" break
+            elseif string.find(combined, "sword") then isolatedSubClass = (string.find(lowerSub, "two") or string.find(combined, "2h")) and "Two-Handed Swords" or "One-Handed Swords" break
+            elseif string.find(combined, "axe") then isolatedSubClass = (string.find(lowerSub, "two") or string.find(combined, "2h")) and "Two-Handed Axes" or "One-Handed Axes" break end
+        end
+        if not isolatedSubClass then
+            if string.find(lowerName, "gun") or string.find(lowerName, "rifle") or string.find(lowerName, "blunderbuss") or string.find(lowerName, "musket") then isolatedSubClass = "Guns"
+            elseif string.find(lowerName, "crossbow") then isolatedSubClass = "Crossbows"
+            elseif string.find(lowerName, "bow") or string.find(lowerName, "longbow") then isolatedSubClass = "Bows"
+            elseif string.find(lowerName, "thrown") or string.find(lowerName, "throwing") or string.find(lowerName, "hatchet") then isolatedSubClass = "Thrown" end
+        end
+        if isolatedSubClass then itemSubClass = isolatedSubClass end
+    end
+    if rarityKey and cCfg.quality then
+        local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
+        if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end end
+    end
+    if cCfg.autoGreedUnusable and IsItemUnusable(itemLink) then if ExecuteRollChoice(rollID, 2, itemLink, "Unusable Red Text") then return end end
+    if (itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor then
+        local aChoice = 0 if cCfg.bulkArmor and cCfg.bulkArmor > 0 then aChoice = cCfg.bulkArmor else aChoice = cCfg.armor[itemSubClass] or 0 end
+        if aChoice > 0 then if ExecuteRollChoice(rollID, aChoice, itemLink, "Armor Filter: " .. itemSubClass) then return end end
+    end
+    if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or itemSubClass == "Guns" or itemSubClass == "Bows" or itemSubClass == "Crossbows" or itemSubClass == "Thrown" then
+        if cCfg.weapons and cCfg.weapons[itemSubClass] and cCfg.weapons[itemSubClass] > 0 then if ExecuteRollChoice(rollID, cCfg.weapons[itemSubClass], itemLink, "Weapon Auto Filter: " .. itemSubClass) then return end end
+        local droppedScore = CalculateItemScore(itemLink)
+        if alertTextString then alertTextString:SetText("|cFFFFD100Weapon Dropped! Manual Choice Required|r") end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore)) return 
+    end
+    if itemType == "Weapon" and cCfg.weapons then
+        local wChoice = 0 if cCfg.bulkWeapons and cCfg.bulkWeapons > 0 then wChoice = cCfg.bulkWeapons else wChoice = cCfg.weapons[itemSubClass] or 0 end
+        if wChoice > 0 then if ExecuteRollChoice(rollID, wChoice, itemLink, "Weapon Filter: " .. itemSubClass) then return end end
+    end
+    if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
+        local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
+        local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
+        if droppedScore > equippedScore then 
+            if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[AutoRoll Alert]|r %s (|cFF00FF00Weight Score: %.2f|r) beats Equipped (|cFFFF0000Score: %.2f|r). Suggesting NEED!", itemLink, droppedScore, equippedScore))
+        end
+    end
+end
+
+
 function IsItemUnusable(itemLink)
     if not itemLink then return false end
     local _, _, _, _, _, itemType, itemSubClass = GetItemInfo(itemLink)
@@ -170,3 +240,74 @@ function ExecuteRollChoice(rollID, choiceCode, itemLink, reason)
     end
     return false
 end
+-- Cross-File Interface Trigger: Allows InterfaceGUI.lua to toggle frames smoothly across file borders
+function ToggleUI()
+    if not settingsFrame then 
+        BuildUI() 
+    end
+    if settingsFrame then 
+        if settingsFrame:IsShown() then 
+            settingsFrame:Hide() 
+            if statFrame then statFrame:Hide() end 
+            if weightFrame then weightFrame:Hide() end 
+        else 
+            settingsFrame:Show() 
+        end 
+    end
+end
+
+local isLoaded = false
+function InitializeAddon() 
+    if isLoaded then return end isLoaded = true 
+    if type(AutoRollConfig) ~= "table" or not AutoRollConfig.classProfiles then AutoRollConfig = nil end
+    if not AutoRollConfig then AutoRollConfig = defaults 
+    else 
+        if not AutoRollConfig.charSettings then AutoRollConfig.charSettings = {} end
+        for k, v in pairs(defaults) do if AutoRollConfig[k] == nil then AutoRollConfig[k] = v end end 
+    end 
+    local charKey = GetCharacterUniqueKey()
+    if not AutoRollConfig.charSettings[charKey] then AutoRollConfig.charSettings[charKey] = GetBlankCharSettings() end
+    local playerClass = GetPlayerClassProfile() local isProfileBlank = true
+    if AutoRollConfig.classProfiles[playerClass] then
+        for k, val in pairs(AutoRollConfig.classProfiles[playerClass]) do if val and val ~= 0 then isProfileBlank = false break end end
+    end
+    if not AutoRollConfig.classProfiles[playerClass] or isProfileBlank then
+        if AutoRoll_ClassTemplates then
+            local foundTemplate = nil
+            for templateName, templateData in pairs(AutoRoll_ClassTemplates) do
+                if string.lower(templateName) == string.lower(playerClass) then foundTemplate = templateData break end
+            end
+            if foundTemplate then
+                AutoRollConfig.classProfiles[playerClass] = {}
+                for k, v in pairs(foundTemplate) do AutoRollConfig.classProfiles[playerClass][k] = v end
+            else AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable() end
+        else AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable() end
+    end
+    if AutoRollConfig.classProfiles[playerClass]["Ranged Attack Power"] == nil then AutoRollConfig.classProfiles[playerClass]["Ranged Attack Power"] = 0 end
+    if AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
+        for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do tempWeights[k] = tonumber(v) or 0 end
+    end
+    BuildLauncherButton() 
+end
+
+mainFrame = CreateFrame("Frame")
+mainFrame:RegisterEvent("ADDON_LOADED") mainFrame:RegisterEvent("PLAYER_LOGIN")
+mainFrame:RegisterEvent("START_LOOT_ROLL") mainFrame:RegisterEvent("CANCEL_LOOT_ROLL")
+mainFrame:SetScript("OnEvent", function(self, event, arg1) 
+    if event == "ADDON_LOADED" and arg1 == "AutoRoll" then pcall(InitializeAddon) 
+    elseif event == "PLAYER_LOGIN" then pcall(InitializeAddon) 
+    elseif event == "START_LOOT_ROLL" then 
+        local rollID = arg1 local itemLink = GetLootRollItemLink(rollID) handledRolls[rollID] = false 
+        if itemLink then 
+            local itemName = GetItemInfo(itemLink)
+            if not itemName then
+                local retryFrame = CreateFrame("Frame") local elapsed = 0
+                retryFrame:SetScript("OnUpdate", function(f, delta)
+                    elapsed = elapsed + delta
+                    if GetItemInfo(itemLink) then pcall(ProcessLootRoll, rollID, itemLink) retryFrame:SetScript("OnUpdate", nil)
+                    elseif elapsed > 2.0 then retryFrame:SetScript("OnUpdate", nil) end
+                end)
+            else pcall(ProcessLootRoll, rollID, itemLink) end
+        end 
+    elseif event == "CANCEL_LOOT_ROLL" then handledRolls[arg1] = nil end 
+end)
