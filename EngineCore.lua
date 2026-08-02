@@ -153,14 +153,8 @@ function ProcessLootRoll(rollID, itemLink)
     -- PRIORITY 1: HARD BLOCK USABILITY SHIELD (Instantly drops unwearable gear)
     -- =========================================================================
     if not isRecipeItem then isUnusable = IsItemUnusable(itemLink) end
-    if isUnusable then
-        -- Auto-greeds or passes unwearable gear immediately before analyzing any configuration stats
-        local fallbackAction = cCfg.autoGreedUnusable and 2 or 3
-        local fallbackReason = cCfg.autoGreedUnusable and "Unusable Greed Catch" or "Unusable Pass Exclusion"
-        if ExecuteRollChoice(rollID, fallbackAction, itemLink, fallbackReason) then return end
-    end
 
-        -- =========================================================================
+    -- =========================================================================
     -- PRIORITY 2: SMART STATS UPGRADE TRACKER (Prioritizes item slot upgrades)
     -- =========================================================================
     if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
@@ -181,9 +175,12 @@ function ProcessLootRoll(rollID, itemLink)
     end
     if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or itemSubClass == "Guns" or itemSubClass == "Bows" or itemSubClass == "Crossbows" or itemSubClass == "Thrown" then
         if cCfg.weapons and cCfg.weapons[itemSubClass] and cCfg.weapons[itemSubClass] > 0 then if ExecuteRollChoice(rollID, cCfg.weapons[itemSubClass], itemLink, "Weapon Auto Filter: " .. itemSubClass) then return end end
-        local droppedScore = CalculateItemScore(itemLink)
-        if alertTextString then alertTextString:SetText("|cFFFFD100Weapon dropped! Manual pause.|r") end
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore)) return 
+        local hasQualityRule = rarityKey and cCfg.quality and ((cCfg.bulkQuality and cCfg.bulkQuality > 0) or (cCfg.quality[rarityKey] or 0) > 0)
+        if not hasQualityRule then
+            local droppedScore = CalculateItemScore(itemLink)
+            if alertTextString then alertTextString:SetText("|cFFFFD100Weapon dropped! Manual pause.|r") end
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore)) return 
+        end
     end
     if itemType == "Weapon" and cCfg.weapons then
         local wChoice = 0 if cCfg.bulkWeapons and cCfg.bulkWeapons > 0 then wChoice = cCfg.bulkWeapons else wChoice = cCfg.weapons[itemSubClass] or 0 end
@@ -196,6 +193,15 @@ function ProcessLootRoll(rollID, itemLink)
     if rarityKey and cCfg.quality then
         local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
         if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end end
+    end
+
+    -- =========================================================================
+    -- FINAL FALLBACK: Unusable gear only triggers after explicit item rules fail
+    -- =========================================================================
+    if isUnusable then
+        local fallbackAction = cCfg.autoGreedUnusable and 2 or 3
+        local fallbackReason = cCfg.autoGreedUnusable and "Unusable Greed Catch" or "Unusable Pass Exclusion"
+        if ExecuteRollChoice(rollID, fallbackAction, itemLink, fallbackReason) then return end
     end
 end
 
@@ -214,7 +220,8 @@ function IsItemUnusable(itemLink)
     
     -- 1. HARD IMPLEMENTED LIVE EQUIPMENT SKILLS SHIELD
     local lowSub = string.lower(itemSubClass or "")
-    if itemType == "Armor" and lowSub ~= "cloth" and lowSub ~= "misc" and lowSub ~= "" then
+    local isAccessorySlot = itemEquipLoc == "INVTYPE_NECK" or itemEquipLoc == "INVTYPE_FINGER" or itemEquipLoc == "INVTYPE_TRINKET" or itemEquipLoc == "INVTYPE_CLOAK" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_BODY" or itemEquipLoc == "INVTYPE_TABARD"
+    if itemType == "Armor" and not isAccessorySlot and lowSub ~= "cloth" and lowSub ~= "leather" and lowSub ~= "mail" and lowSub ~= "plate" and lowSub ~= "misc" and lowSub ~= "miscellaneous" and lowSub ~= "shields" and lowSub ~= "" then
         -- Direct Database Validation: If your character skills tab lacks this proficiency, flag it instantly
         if playerArmorSkills and not playerArmorSkills[lowSub] then unusable = true end
     elseif itemType == "Weapon" and lowSub ~= "" then

@@ -12,24 +12,24 @@ end
 
 function SyncBulkArmorOptions(val)
     local charKey = GetCharacterUniqueKey() local cCfg = AutoRollConfig.charSettings[charKey]
-    if val and val > 0 and cCfg then
-        cCfg.armor["Cloth"] = val cCfg.armor["Leather"] = val cCfg.armor["Mail"] = val cCfg.armor["Plate"] = val cCfg.armor["Shields"] = val
+    if cCfg then
+        cCfg.armor["Cloth"] = val or 0 cCfg.armor["Leather"] = val or 0 cCfg.armor["Mail"] = val or 0 cCfg.armor["Plate"] = val or 0 cCfg.armor["Shields"] = val or 0
         ForcePanelVisualSync()
     end
 end
 
 function SyncBulkWeaponOptions(val)
     local charKey = GetCharacterUniqueKey() local cCfg = AutoRollConfig.charSettings[charKey]
-    if val and val > 0 and cCfg then
-        cCfg.weapons["Daggers"] = val cCfg.weapons["One-Handed Swords"] = val cCfg.weapons["Two-Handed Swords"] = val cCfg.weapons["One-Handed Maces"] = val cCfg.weapons["Two-Handed Maces"] = val
-        cCfg.weapons["One-Handed Axes"] = val cCfg.weapons["Two-Handed Axes"] = val cCfg.weapons["Staves"] = val cCfg.weapons["Bows"] = val cCfg.weapons["Guns"] = val cCfg.weapons["Crossbows"] = val
+    if cCfg then
+        cCfg.weapons["Daggers"] = val or 0 cCfg.weapons["One-Handed Swords"] = val or 0 cCfg.weapons["Two-Handed Swords"] = val or 0 cCfg.weapons["One-Handed Maces"] = val or 0 cCfg.weapons["Two-Handed Maces"] = val or 0
+        cCfg.weapons["One-Handed Axes"] = val or 0 cCfg.weapons["Two-Handed Axes"] = val or 0 cCfg.weapons["Staves"] = val or 0 cCfg.weapons["Bows"] = val or 0 cCfg.weapons["Guns"] = val or 0 cCfg.weapons["Crossbows"] = val or 0
         ForcePanelVisualSync()
     end
 end
 
 function SyncBulkQualityOptions(val)
     local charKey = GetCharacterUniqueKey() local cCfg = AutoRollConfig.charSettings[charKey]
-    if val and val > 0 and cCfg then cCfg.quality["Green"] = val cCfg.quality["Blue"] = val cCfg.quality["Purple"] = val ForcePanelVisualSync() end
+    if cCfg then cCfg.quality["Green"] = val or 0 cCfg.quality["Blue"] = val or 0 cCfg.quality["Purple"] = val or 0 ForcePanelVisualSync() end
 end
 
 function CreateDropdownMenu(parent, label, x, y, configTable, key, bulkCategory)
