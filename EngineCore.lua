@@ -93,12 +93,13 @@ function CalculateItemScore(itemLink)
                     local weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
                     if weight > 0 then
                         local cleanPat = nil
-                        if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
-                        elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
-                        elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
-                        elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                        elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
-                        elseif item.key == "Haste" then cleanPat = "(%d+)%s*[Hh]aste" end
+                        if item.key == "Strength" then cleanPat = "%+(%d+)%s*[Ss]trength"
+                        elseif item.key == "Agility" then cleanPat = "%+(%d+)%s*[Aa]gility"
+                        elseif item.key == "Stamina" then cleanPat = "%+(%d+)%s*[Ss]tamina"
+                        elseif item.key == "Intellect" then cleanPat = "%+(%d+)%s*[Ii]ntellect"
+                        elseif item.key == "Spirit" then cleanPat = "%+(%d+)%s*[Ss]pirit"
+                        elseif item.key == "Haste" then cleanPat = "%+(%d+)%s*[Hh]aste" end
+
                         if cleanPat then
                             local match = string.match(text, cleanPat)
                             if match and tonumber(match) then totalScore = totalScore + (tonumber(match) * weight) end
@@ -126,6 +127,22 @@ function ProcessLootRoll(rollID, itemLink)
     if not itemName then return end
     local rarityKey = nil
     if itemRarity == 2 then rarityKey = "Green" elseif itemRarity == 3 then rarityKey = "Blue" elseif itemRarity == 4 then rarityKey = "Purple" end
+        -- =========================================================================
+    -- RECIPE INTERCEPTOR: Snipes unlearned tradeskill formulas before generic filters sweep them
+    -- =========================================================================
+    local isRecipeItem = (itemType == "Recipe")
+    local isUnusable, recipeState = false, "StandardGear"
+    if isRecipeItem then
+        isUnusable, recipeState = IsItemUnusable(itemLink)
+    end
+    
+    if isRecipeItem and recipeState == "UnknownUsableRecipe" then
+        if alertTextString then alertTextString:SetText("|cFF3399FFRecipe Sniper: NEED|r") end
+        if ExecuteRollChoice(rollID, 1, itemLink, "Unknown Usable Tradeskill Blueprints") then
+            return 
+        end
+    end
+
     if not rarityKey and itemLink then
         if string.find(itemLink, "|cff1eff00") then rarityKey = "Green"
         elseif string.find(itemLink, "|cff0070dd") or string.find(itemLink, "|cff0070d8") then rarityKey = "Blue"
@@ -134,21 +151,34 @@ function ProcessLootRoll(rollID, itemLink)
     if itemType == "Weapon" then
         local lowerSub = string.lower(itemSubClass or "") local lowerEquip = string.lower(itemEquipLoc or "") local lowerName = string.lower(itemName or "") local isolatedSubClass = nil
         for i = 1, scannerTooltip:NumLines() do
-            local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i] local rightLine = _G["AutoRollScannerTooltipTextRight" .. i]
-            local leftText = leftLine and leftLine:GetText() or "" local rightText = rightLine and rightLine:GetText() or "" local combined = string.lower(leftText .. " " .. rightText)
-            if string.find(combined, "dagger") then isolatedSubClass = "Daggers" break
-            elseif string.find(combined, "staff") or string.find(combined, "staves") then isolatedSubClass = "Staves" break
-            elseif string.find(combined, "polearm") then isolatedSubClass = "Polearms" break
-            elseif string.find(combined, "wand") then isolatedSubClass = "Wands" break
-            elseif string.find(combined, "fist") or string.find(combined, "claw") or string.find(combined, "knuckles") then isolatedSubClass = "Fist Weapons" break
-            elseif string.find(combined, "gun") or string.find(combined, "rifle") or string.find(combined, "musket") or string.find(combined, "shotgun") then isolatedSubClass = "Guns" break
-            elseif string.find(combined, "crossbow") then isolatedSubClass = "Crossbows" break
-            elseif string.find(combined, "bow") then isolatedSubClass = "Bows" break
-            elseif string.find(combined, "thrown") or string.find(combined, "throwing") then isolatedSubClass = "Thrown" break
-            elseif string.find(combined, "mace") then isolatedSubClass = (string.find(lowerSub, "two") or string.find(combined, "2h")) and "Two-Handed Maces" or "One-Handed Maces" break
-            elseif string.find(combined, "sword") then isolatedSubClass = (string.find(lowerSub, "two") or string.find(combined, "2h")) and "Two-Handed Swords" or "One-Handed Swords" break
-            elseif string.find(combined, "axe") then isolatedSubClass = (string.find(lowerSub, "two") or string.find(combined, "2h")) and "Two-Handed Axes" or "One-Handed Axes" break end
+            local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+            local rightLine = _G["AutoRollScannerTooltipTextRight" .. i]
+            
+            if leftLine then
+                local text = leftLine:GetText() or "" local r, g, b = leftLine:GetTextColor()
+                if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
+                    if not string.find(string.lower(text), "level") and not string.find(string.lower(text), "requires") then unusable = true break end
+                end
+                if text ~= "" and not isRecipeItem then
+                    local lowerText = string.lower(text)
+                    if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true break
+                    elseif string.find(lowerText, "can't equip") or string.find(lowerText, "cannot equip") then unusable = true break end
+                end
+            end
+        
+            if rightLine then
+                local text = rightLine:GetText() or "" local r, g, b = rightLine:GetTextColor()
+                if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
+                    if not string.find(string.lower(text), "level") and not string.find(string.lower(text), "requires") then unusable = true break end
+                end
+                if text ~= "" and not isRecipeItem then
+                    local lowerText = string.lower(text)
+                    -- Hex Shield: Checks if the right column text string contains embedded red color formatting tags directly
+                    if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true break end
+                end
+            end
         end
+
         if not isolatedSubClass then
             if string.find(lowerName, "gun") or string.find(lowerName, "rifle") or string.find(lowerName, "blunderbuss") or string.find(lowerName, "musket") then isolatedSubClass = "Guns"
             elseif string.find(lowerName, "crossbow") then isolatedSubClass = "Crossbows"
@@ -161,7 +191,12 @@ function ProcessLootRoll(rollID, itemLink)
         local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
         if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end end
     end
-    if cCfg.autoGreedUnusable and IsItemUnusable(itemLink) then if ExecuteRollChoice(rollID, 2, itemLink, "Unusable Red Text") then return end end
+        -- 2. PRIORITY TWO: Catch-All Red Text Armor & Requirement Filter
+    if not isRecipeItem then isUnusable = IsItemUnusable(itemLink) end
+    if cCfg.autoGreedUnusable and isUnusable then
+        if ExecuteRollChoice(rollID, 2, itemLink, "Unusable Red Text") then return end
+    end
+
     if (itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor then
         local aChoice = 0 if cCfg.bulkArmor and cCfg.bulkArmor > 0 then aChoice = cCfg.bulkArmor else aChoice = cCfg.armor[itemSubClass] or 0 end
         if aChoice > 0 then if ExecuteRollChoice(rollID, aChoice, itemLink, "Armor Filter: " .. itemSubClass) then return end end
@@ -188,52 +223,95 @@ end
 
 function IsItemUnusable(itemLink)
     if not itemLink then return false, "StandardGear" end
-    local _, _, _, _, _, itemType, itemSubClass = GetItemInfo(itemLink)
-    if itemType == "Weapon" then
-        local lowerSub = string.lower(itemSubClass or "")
-        if lowerSub == "crossbow" or lowerSub == "crossbows" or lowerSub == "bows" or lowerSub == "bow" then return true, "StandardGear" end
+    local _, _, _, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
+    local isRecipeItem = (itemType == "Recipe")
+    
+    -- Safety Check: If background data isn't loaded yet, run a fast fallback sync scan
+    if not playerArmorSkills or not playerWeaponSkills then ScanCharacterSkillsEngine() end
+    
+    local unusable = false
+    local isAlreadyKnown = false
+    local hasUnusableProfession = false
+    
+    -- 1. HARD IMPLEMENTED LIVE EQUIPMENT SKILLS SHIELD
+    local lowSub = string.lower(itemSubClass or "")
+    if itemType == "Armor" and lowSub ~= "cloth" and lowSub ~= "misc" and lowSub ~= "" then
+        -- Direct Database Validation: If your character skills tab lacks this proficiency, flag it instantly
+        if playerArmorSkills and not playerArmorSkills[lowSub] then unusable = true end
+    elseif itemType == "Weapon" and lowSub ~= "" then
+        -- Normalizes specific name variances cleanly into raw weapon class terms
+        local matchedWpSkill = false
+        if playerWeaponSkills then
+            if playerWeaponSkills[lowSub] then matchedWpSkill = true
+            elseif string.find(lowSub, "sword") and playerWeaponSkills["swords"] then matchedWpSkill = true
+            elseif string.find(lowSub, "mace") and playerWeaponSkills["maces"] then matchedWpSkill = true
+            elseif string.find(lowSub, "axe") and playerWeaponSkills["axes"] then matchedWpSkill = true
+            elseif string.find(lowSub, "dagger") and playerWeaponSkills["daggers"] then matchedWpSkill = true
+            elseif (string.find(lowSub, "staff") or string.find(lowSub, "staves")) and playerWeaponSkills["staves"] then matchedWpSkill = true
+            elseif string.find(lowSub, "bow") and playerWeaponSkills["bows"] then matchedWpSkill = true
+            elseif string.find(lowSub, "crossbow") and playerWeaponSkills["crossbows"] then matchedWpSkill = true
+            elseif string.find(lowSub, "gun") and playerWeaponSkills["guns"] then matchedWpSkill = true
+            elseif string.find(lowSub, "fist") and playerWeaponSkills["fist weapons"] then matchedWpSkill = true end
+        end
+        if not matchedWpSkill then unusable = true end
     end
-    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(itemLink)
-    local unusable, isRecipeItem, isAlreadyKnown, hasUnusableProfession = false, (itemType == "Recipe"), false, false
-    local myProfessions = {}
-    for i = 1, 100 do
-        local name = GetSpellName(i, "spell") if not name then break end
-        local lowerName = string.lower(name)
-        if string.find(lowerName, "alchemy") then myProfessions["alchemy"] = true
-        elseif string.find(lowerName, "blacksmithing") then myProfessions["blacksmithing"] = true
-        elseif string.find(lowerName, "leatherworking") then myProfessions["leatherworking"] = true
-        elseif string.find(lowerName, "tailoring") then myProfessions["tailoring"] = true
-        elseif string.find(lowerName, "engineering") then myProfessions["engineering"] = true
-        elseif string.find(lowerName, "enchanting") then myProfessions["enchanting"] = true
-        elseif string.find(lowerName, "jewelcrafting") then myProfessions["jewelcrafting"] = true
-        elseif string.find(lowerName, "cooking") then myProfessions["cooking"] = true
-        elseif string.find(lowerName, "first aid") then myProfessions["first aid"] = true end
-    end
+    
+    -- 2. DYNAMIC TEXT ANALYSIS LAYER (Validates Recipe Requirements and Already Known Flags)
+    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scannerTooltip:ClearLines()
+    scannerTooltip:SetHyperlink(itemLink)
+    
     for i = 1, scannerTooltip:NumLines() do
         local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i]
-        if leftLine then
-            local text = leftLine:GetText() or "" local r, g, b = leftLine:GetTextColor() local lowerText = string.lower(text)
-            if isRecipeItem and (string.find(lowerText, "already known") or string.find(lowerText, "already learnt")) then isAlreadyKnown = true end
-            if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 and text ~= "" then
-                if isRecipeItem then
-                    local foundMatchingOwnedProf = false
-                    for profName in pairs(myProfessions) do if string.find(lowerText, profName) then foundMatchingOwnedProf = true break end end
-                    if not foundMatchingOwnedProf and string.find(lowerText, "requires") then hasUnusableProfession = true end
-                elseif not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true end
+        local rightLine = _G["AutoRollScannerTooltipTextRight" .. i]
+        local textL = leftLine and leftLine:GetText() or ""
+        local textR = rightLine and rightLine:GetText() or ""
+        local lowerL = string.lower(textL)
+        local lowerR = string.lower(textR)
+        
+        if isRecipeItem then
+            if string.find(lowerL, "already known") or string.find(lowerL, "already learnt") then isAlreadyKnown = true end
+            if string.find(lowerL, "requires") then
+                local foundMatchingOwnedProf = false
+                if playerProfessions then
+                    for profName in pairs(playerProfessions) do
+                        if string.find(lowerL, profName) then foundMatchingOwnedProf = true break end
+                    end
+                end
+                if not foundMatchingOwnedProf then hasUnusableProfession = true end
             end
-            if text ~= "" and not isRecipeItem then
-                if string.find(lowerText, "|cffff0000") and not string.find(lowerText, "level") and not string.find(lowerText, "requires") then unusable = true
-                elseif string.find(lowerText, "can't equip") or string.find(lowerText, "cannot equip") then unusable = true end
+        else
+            -- Non-Recipe Text Verification (Fallback text catches extra red alerts or explicit cannot equip notices)
+            if leftLine and textL ~= "" then
+                local r, g, b = leftLine:GetTextColor()
+                if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 then
+                    if not string.find(lowerL, "level") and not string.find(lowerL, "requires") then unusable = true end
+                end
+                if string.find(lowerL, "|cffff0000") or string.find(lowerL, "can't equip") or string.find(lowerL, "cannot equip") then
+                    if not string.find(lowerL, "level") and not string.find(lowerL, "requires") then unusable = true end
+                end
+            end
+            if rightLine and textR ~= "" then
+                local r, g, b = rightLine:GetTextColor()
+                if r and g and b and r > 0.9 and g < 0.2 and b < 0.2 then
+                    if not string.find(lowerR, "level") and not string.find(lowerR, "requires") then unusable = true end
+                end
+                if string.find(lowerR, "|cffff0000") or string.find(lowerR, "can't equip") or string.find(lowerR, "cannot equip") then
+                    if not string.find(lowerR, "level") and not string.find(lowerR, "requires") then unusable = true end
+                end
             end
         end
     end
     scannerTooltip:Hide()
+    
     if isRecipeItem then
         if isAlreadyKnown or hasUnusableProfession then return true, "KnownOrUnusableRecipe"
         else return false, "UnknownUsableRecipe" end
     end
+    
     return unusable, "StandardGear"
 end
+
 
 function CloseActiveLootFrame(rollID)
     for i = 1, 4 do
@@ -302,6 +380,9 @@ function InitializeAddon()
     if AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
         for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do tempWeights[k] = tonumber(v) or 0 end
     end
+    -- Skills Cache Ingestion: Replaces old manual overrides with live server metrics
+    ScanCharacterSkillsEngine()
+
     BuildLauncherButton() 
 end
 
@@ -311,6 +392,8 @@ mainFrame:RegisterEvent("START_LOOT_ROLL") mainFrame:RegisterEvent("CANCEL_LOOT_
 mainFrame:SetScript("OnEvent", function(self, event, arg1) 
     if event == "ADDON_LOADED" and arg1 == "AutoRoll" then pcall(InitializeAddon) 
     elseif event == "PLAYER_LOGIN" then pcall(InitializeAddon) 
+    elseif event == "PLAYER_LOGIN" or event == "SKILL_LINES_CHANGED" then pcall(InitializeAddon)
+
     elseif event == "START_LOOT_ROLL" then 
         local rollID = arg1 local itemLink = GetLootRollItemLink(rollID) handledRolls[rollID] = false 
         if itemLink then 
@@ -326,3 +409,42 @@ mainFrame:SetScript("OnEvent", function(self, event, arg1)
         end 
     elseif event == "CANCEL_LOOT_ROLL" then handledRolls[arg1] = nil end 
 end)
+
+-- =========================================================================
+-- SYSTEM SCANNER MODULE: Dynamically queries your native Skills Tab live
+-- =========================================================================
+playerProfessions = {}
+playerArmorSkills = {}
+playerWeaponSkills = {}
+
+function ScanCharacterSkillsEngine()
+    playerProfessions = {} playerArmorSkills = {} playerWeaponSkills = {}
+    local currentHeader = ""
+    for i = 1, 200 do
+        local skillName, isHeader, _, skillRank, _, _, _, _, _, _, _, _, _ = GetSkillLineInfo(i)
+        if not skillName then break end
+        
+        if isHeader then
+            currentHeader = skillName
+        else
+            local lowName = string.lower(skillName)
+            if currentHeader == "Professions" or currentHeader == "Secondary Skills" then
+                playerProfessions[lowName] = skillRank
+            elseif currentHeader == "Armor Proficiencies" then
+                playerArmorSkills[lowName] = true
+            elseif currentHeader == "Weapon Skills" then
+                -- Cleans server variations like "One-Handed Swords" down to "swords" or matches exact families
+                playerWeaponSkills[lowName] = true
+                if string.find(lowName, "sword") then playerWeaponSkills["swords"] = true end
+                if string.find(lowName, "mace") then playerWeaponSkills["maces"] = true end
+                if string.find(lowName, "axe") then playerWeaponSkills["axes"] = true end
+                if string.find(lowName, "dagger") then playerWeaponSkills["daggers"] = true end
+                if string.find(lowName, "staff") or string.find(lowName, "staves") then playerWeaponSkills["staves"] = true end
+                if string.find(lowName, "bow") then playerWeaponSkills["bows"] = true end
+                if string.find(lowName, "crossbow") then playerWeaponSkills["crossbows"] = true end
+                if string.find(lowName, "gun") then playerWeaponSkills["guns"] = true end
+                if string.find(lowName, "fist") then playerWeaponSkills["fist weapons"] = true end
+            end
+        end
+    end
+end

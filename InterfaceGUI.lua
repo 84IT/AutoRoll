@@ -1,3 +1,12 @@
+-- Cross-File Scope Mapping: Connects shared variable handles cleanly across our separate file sheets
+scannerTooltip = _G.scannerTooltip or scannerTooltip
+
+-- Cross-File Usability Link: Pulls your modular dual-column color engine straight into your hover panels
+function IsItemUnusable(itemLink)
+    if _G.IsItemUnusable then return _G.IsItemUnusable(itemLink) end
+    return false, "StandardGear"
+end
+
 -- =========================================================================
 -- AUTOROLL MODULAR CORE - INTERFACEGUI.LUA (PANELS, HOVER HANDLERS & CMDS)
 -- =========================================================================
@@ -300,6 +309,55 @@ function BuildUI()
     local textLines = { "|cFFFFD100How AutoRoll Functions Internally:|r", "• Configured rule actions occur |cFFFFFFFFinstantly|r the exact millisecond a new item loot roll framework window prompt displays on your interface.", "• Setting an item type target rule value profile parameter to |cFFFF9900'Manual'|r completely prevents the script engine from interacting with it automatically, preserving regular item window selections.", "• |cFFFF2222CRITICAL SAFETY mechanism:|r If an item remains set to 'Manual' (or you decide to ignore a roll window while locked in heavy combat), the engine continuously tracks remaining frame timeout data.", "• When less than |cFFFFFFFF5 seconds|r remain on an ignored prompt, the fallback engine triggers an automatic |cFF00FF00Greed|r command selection so you never completely forfeit eligible group rewards." }
     helpText:SetText(table.concat(textLines, "\n"))
     
+        -- Engineering Cog Button: Spits out a complete account/character configuration dump straight to chat logs
+    local diagnosticBtn = CreateFrame("Button", nil, settingsFrame) 
+    diagnosticBtn:SetSize(22, 22) 
+    diagnosticBtn:SetPoint("RIGHT", statToggleBtn, "LEFT", -34, 0) -- Positioned cleanly next to help button
+    diagnosticBtn:SetNormalTexture("Interface\\Icons\\Trade_Engineering")
+    
+    local btnHighlight = diagnosticBtn:CreateTexture(nil, "HIGHLIGHT") 
+    btnHighlight:SetTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight") 
+    btnHighlight:SetAllPoints(diagnosticBtn) 
+    diagnosticBtn:SetHighlightTexture(btnHighlight)
+    
+    diagnosticBtn:SetScript("OnClick", function()
+        local choices = { [0] = "|cFF999999Manual|r", [1] = "|cFF3399FFNeed|r", [2] = "|cFF00FF00Greed|r", [3] = "|cFFFF2222Pass|r" }
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFD100=== AutoRoll Current Configuration Audit ===|r")
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("Addon Active Status: %s", cCfg.enabled and "|cFF00FF00ENABLED|r" or "|cFFFF2222DISABLED|r"))
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("Smart Stats Module: %s", cCfg.statModuleEnabled and "|cFF00FF00RUNNING|r" or "|cFF999999INACTIVE|r"))
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("Auto-Greed Unusable (Red Text): %s", cCfg.autoGreedUnusable and "|cFF00FF00ON|r" or "|cFFFF2222OFF|r"))
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00-- Quality Selection Priorities --|r")
+        for k, v in pairs(cCfg.quality or {}) do DEFAULT_CHAT_FRAME:AddMessage(string.format("  %s Rarity: %s", k, choices[v] or "|cFFFF0000Error|r")) end
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00-- Armor Selection Matrices --|r")
+        for k, v in pairs(cCfg.armor or {}) do DEFAULT_CHAT_FRAME:AddMessage(string.format("  %s Class: %s", k, choices[v] or "|cFFFF0000Error|r")) end
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00-- Weapon Selection Matrices --|r")
+        for k, v in pairs(cCfg.weapons or {}) do DEFAULT_CHAT_FRAME:AddMessage(string.format("  %s Type: %s", k, choices[v] or "|cFFFF0000Error|r")) end
+        
+        -- =========================================================================
+        -- LIVE SERVER SKILLS DATABASE DUMP: Audits your exact proficiency names
+        -- =========================================================================
+        if ScanCharacterSkillsEngine then ScanCharacterSkillsEngine() end
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF3399FF=== Live Server Skills Tab Inventory Audit ===|r")
+        
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[Tradeskills / Secondary Profiles]:|r")
+        if _G.playerProfessions then
+            for prof, rank in pairs(_G.playerProfessions) do DEFAULT_CHAT_FRAME:AddMessage(string.format("  Prof: %s (Level Skill Rank: %d/300)", prof, rank)) end
+        end
+        
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[Armor Mastery Proficiencies]:|r")
+        if _G.playerArmorSkills then
+            for armorClass in pairs(_G.playerArmorSkills) do DEFAULT_CHAT_FRAME:AddMessage(string.format("  Armor Token Key: \"%s\"", armorClass)) end
+        end
+        
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[Weapon Competency Skill Sets]:|r")
+        if _G.playerWeaponSkills then
+            for weaponType in pairs(_G.playerWeaponSkills) do DEFAULT_CHAT_FRAME:AddMessage(string.format("  Weapon Token Key: \"%s\"", weaponType)) end
+        end
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFFD100==============================================|r")
+    end)
+
+
+
     local helpToggleBtn = CreateFrame("Button", nil, settingsFrame, "UIPanelButtonTemplate")
     helpToggleBtn:SetSize(24, 22)
     helpToggleBtn:SetPoint("RIGHT", statToggleBtn, "LEFT", -5, 0)
@@ -391,13 +449,29 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         local _, itemLink = self:GetItem() if not itemLink then return end
         local itemName, _, _, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink) if not itemName then return end
         
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
-        local playerClass = GetPlayerClassProfile()
-        local totalDroppedScore = 0
+        -- =========================================================================
+        -- HOVER HOOK SHIELD: Halts calculation pipelines on classes you cannot wear
+        -- =========================================================================
+        local isUnusableClassGear = false
+        if itemType == "Weapon" then
+            local lowerSub = string.lower(itemSubClass or "")
+            if lowerSub == "crossbow" or lowerSub == "crossbows" or lowerSub == "bows" or lowerSub == "bow" or lowerSub == "fist weapon" or lowerSub == "fist weapons" or string.find(lowerSub, "fist") then isUnusableClassGear = true end
+        elseif itemType == "Armor" then
+            local lowerSub = string.lower(itemSubClass or "")
+            if lowerSub == "librams" or lowerSub == "idols" or lowerSub == "totems" or string.find(lowerSub, "libram") or string.find(lowerSub, "idol") or string.find(lowerSub, "totem") then isUnusableClassGear = true end
+        end
         
+        if isUnusableClassGear then
+            DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
+            DEFAULT_CHAT_FRAME:AddMessage("  |cFFFF2222[UNEQUIPPABLE]: You cannot wear this item class! Skipping score tracking.|r")
+            DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r")
+            return
+        end
+        
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
+        local playerClass = GetPlayerClassProfile() local totalDroppedScore = 0
         for i = 1, self:NumLines() do
-            local leftLine = _G[self:GetName() .. "TextLeft" .. i]
-            local rawText = leftLine and leftLine:GetText() or ""
+            local leftLine = _G[self:GetName() .. "TextLeft" .. i] local rawText = leftLine and leftLine:GetText() or ""
             if rawText ~= "" and not string.find(rawText, "Set:") and not string.find(rawText, "%(%d+%)%s*Set") then
                 for text in string.gmatch(rawText, "[^\r\n]+") do
                     local lineMatched = false
@@ -406,32 +480,26 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                         if AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
                             weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
                         end
-                        
                         local cleanPat = nil
-                        if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
-                        elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
-                        elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
-                        elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                        elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
-                        elseif item.key == "Haste" then cleanPat = "(%d+)%s*[Hh]aste" end
+                        if item.key == "Strength" then cleanPat = "%+(%d+)%s*[Ss]trength"
+                        elseif item.key == "Agility" then cleanPat = "%+(%d+)%s*[Aa]gility"
+                        elseif item.key == "Stamina" then cleanPat = "%+(%d+)%s*[Ss]tamina"
+                        elseif item.key == "Intellect" then cleanPat = "%+(%d+)%s*[Ii]ntellect"
+                        elseif item.key == "Spirit" then cleanPat = "%+(%d+)%s*[Ss]pirit"
+                        elseif item.key == "Haste" then cleanPat = "%+(%d+)%s*[Hh]aste" end
                         
                         if cleanPat then
                             local match = string.match(text, cleanPat)
                             if match then
-                                local value = tonumber(match) or 0 local lineScore = value * weight
-                                totalDroppedScore = totalDroppedScore + lineScore
-                                DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore))
-                                break
+                                local value = tonumber(match) or 0 local lineScore = value * weight totalDroppedScore = totalDroppedScore + lineScore
+                                DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore)) break
                             end
                         else
                             for _, pattern in ipairs(item.pats) do
-                                local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
-                                local match = string.match(text, cleanPattern)
+                                local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "") local match = string.match(text, cleanPattern)
                                 if match then
-                                    local value = tonumber(match) or 0 local lineScore = value * weight
-                                    totalDroppedScore = totalDroppedScore + lineScore lineMatched = true
-                                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore))
-                                    break
+                                    local value = tonumber(match) or 0 local lineScore = value * weight totalDroppedScore = totalDroppedScore + lineScore lineMatched = true
+                                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore)) break
                                 end
                             end
                         end
@@ -440,30 +508,38 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                 end
             end
         end
-        local equippedScore = 0
-        local equippedItemLink = "Slot Combo"
+        local equippedScore = 0 
+        local equippedItemLink = "Slot Combo" 
         local foundSlotID = nil
         
-        local isWeaponSlot = (itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_2HWEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemType == "Weapon" or itemSubClass == "Shields")
-        local isCoreArmor = (itemSubClass == "Cloth" or itemSubClass == "Leather" or itemSubClass == "Mail" or itemSubClass == "Plate")
-        
-        if not isCoreArmor and isWeaponSlot then
-            local mhLink = GetInventoryItemLink("player", 16)
-            local ohLink = GetInventoryItemLink("player", 17)
+        local isWp = (itemEquipLoc == "INVTYPE_WEAPON" or 
+            itemEquipLoc == "INVTYPE_2HWEAPON" or 
+            itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or 
+            itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or 
+            itemEquipLoc == "INVTYPE_SHIELD" or 
+            itemEquipLoc == "INVTYPE_HOLDABLE" or 
+            itemType == "Weapon" or itemSubClass == "Shields")
             
-            local mhScore = mhLink and CalculateItemScore(mhLink) or 0
+        local isArm = (itemSubClass == "Cloth" or 
+            itemSubClass == "Leather" or 
+            itemSubClass == "Mail" or itemSubClass == "Plate")
+        
+        if not isArm and isWp then
+            local mhLink = GetInventoryItemLink("player", 16) 
+            local ohLink = GetInventoryItemLink("player", 17)
+            local mhScore = mhLink and CalculateItemScore(mhLink) or 0 
             local ohScore = ohLink and CalculateItemScore(ohLink) or 0
             
-            equippedScore = mhScore + ohScore
-            equippedItemLink = string.format("MH: %s + OH: %s", mhLink or "[Empty]", ohLink or "[Empty]")
-            
+            equippedScore = mhScore + ohScore 
+            equippedItemLink = string.format("MH: %s + OH: %s", 
+                mhLink or "[Empty]", ohLink or "[Empty]")
+                
             if mhLink and mhScore > 0 then
                 DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Main-Hand Stats...]|r")
-                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
-                scannerTooltip:ClearLines()
-                scannerTooltip:SetHyperlink(mhLink)
+                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") 
+                scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(mhLink)
                 for i = 1, scannerTooltip:NumLines() do
-                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i] 
                     local rTxt = lLine and lLine:GetText() or ""
                     if rTxt ~= "" and not string.find(rTxt, "Set:") and not string.find(rTxt, "%(%d+%)%s*Set") then
                         for text in string.gmatch(rTxt, "[^\r\n]+") do
@@ -474,23 +550,15 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                                 elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
                                 elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
                                 elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
-                                end
-                                
+                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit" end
                                 if cleanPat then
                                     local m = string.match(text, cleanPat)
-                                    if m then
-                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
-                                        break
-                                    end
+                                    if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
                                 else
                                     for _, pattern in ipairs(item.pats) do
-                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
+                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "") 
                                         local m = string.match(text, cleanPattern)
-                                        if m then
-                                            DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
-                                            break
-                                        end
+                                        if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
                                     end
                                 end
                             end
@@ -500,11 +568,10 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             end
             if ohLink and ohScore > 0 then
                 DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Off-Hand/Shield Stats...]|r")
-                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
-                scannerTooltip:ClearLines()
-                scannerTooltip:SetHyperlink(ohLink)
+                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") 
+                scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(ohLink)
                 for i = 1, scannerTooltip:NumLines() do
-                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i]
+                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i] 
                     local rTxt = lLine and lLine:GetText() or ""
                     if rTxt ~= "" and not string.find(rTxt, "Set:") and not string.find(rTxt, "%(%d+%)%s*Set") then
                         for text in string.gmatch(rTxt, "[^\r\n]+") do
@@ -515,23 +582,15 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                                 elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
                                 elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
                                 elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit"
-                                end
-                                
+                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit" end
                                 if cleanPat then
                                     local m = string.match(text, cleanPat)
-                                    if m then
-                                        DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
-                                        break
-                                    end
+                                    if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
                                 else
                                     for _, pattern in ipairs(item.pats) do
-                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
+                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "") 
                                         local m = string.match(text, cleanPattern)
-                                        if m then
-                                            DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w)))
-                                            break
-                                        end
+                                        if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
                                     end
                                 end
                             end
@@ -539,17 +598,13 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                     end
                 end
             end
-            
-            if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" then
-                totalDroppedScore = totalDroppedScore + ohScore
-            elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemSubClass == "Shields" then
-                totalDroppedScore = mhScore + totalDroppedScore
-            end
+            if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" then totalDroppedScore = totalDroppedScore + ohScore
+            elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemSubClass == "Shields" then totalDroppedScore = mhScore + totalDroppedScore end
             foundSlotID = 16
         end
         if not foundSlotID then
             for i = 2, self:NumLines() do
-                local leftLine = _G[self:GetName() .. "TextLeft" .. i]
+                local leftLine = _G[self:GetName() .. "TextLeft" .. i] 
                 local lineText = leftLine and leftLine:GetText() or ""
                 if lineText ~= "" then
                     if string.find(lineText, "Head") or string.find(lineText, "Helm") then foundSlotID = 1 break
@@ -563,56 +618,39 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
                     elseif string.find(lineText, "Hands") or string.find(lineText, "Gloves") or string.find(lineText, "Handwraps") or string.find(lineText, "Gauntlets") then foundSlotID = 10 break
                     elseif lineText == "Finger" or string.find(lineText, "%sRing%s") or lineText == "Ring" then foundSlotID = 11 break
                     elseif string.find(lineText, "Trinket") then foundSlotID = 12 break
-                    elseif string.find(lineText, "Back") or string.find(lineText, "Cloak") or string.find(lineText, "Cape") then foundSlotID = 15 break
-                    end
+                    elseif string.find(lineText, "Back") or string.find(lineText, "Cloak") or string.find(lineText, "Cape") then foundSlotID = 15 break end
                 end
             end
-            
-            if not foundSlotID and itemEquipLoc and SLOT_MAP and SLOT_MAP[itemEquipLoc] then
-                foundSlotID = SLOT_MAP[itemEquipLoc]
-            end
-            
+            if not foundSlotID and itemEquipLoc and SLOT_MAP and SLOT_MAP[itemEquipLoc] then foundSlotID = SLOT_MAP[itemEquipLoc] end
             if foundSlotID then
                 if foundSlotID == 11 or itemEquipLoc == "INVTYPE_FINGER" then
-                    local r1Link = GetInventoryItemLink("player", 11)
-                    local r2Link = GetInventoryItemLink("player", 12)
-                    local s1 = r1Link and CalculateItemScore(r1Link) or 0
-                    local s2 = r2Link and CalculateItemScore(r2Link) or 0
+                    local r1Link = GetInventoryItemLink("player", 11) local r2Link = GetInventoryItemLink("player", 12)
+                    local s1 = r1Link and CalculateItemScore(r1Link) or 0 local s2 = r2Link and CalculateItemScore(r2Link) or 0
                     equippedScore = math.min(s1, s2)
                     equippedItemLink = string.format("\n    Slot 1: %s (Score: %.2f)\n    Slot 2: %s (Score: %.2f)\n    [Challenging Lowest]", r1Link or "[Empty]", s1, r2Link or "[Empty]", s2)
                 elseif foundSlotID == 12 or itemEquipLoc == "INVTYPE_TRINKET" then
-                    local t1Link = GetInventoryItemLink("player", 13)
-                    local t2Link = GetInventoryItemLink("player", 14)
-                    local s1 = t1Link and CalculateItemScore(t1Link) or 0
-                    local s2 = t2Link and CalculateItemScore(t2Link) or 0
+                    local t1Link = GetInventoryItemLink("player", 13) local t2Link = GetInventoryItemLink("player", 14)
+                    local s1 = t1Link and CalculateItemScore(t1Link) or 0 local s2 = t2Link and CalculateItemScore(t2Link) or 0
                     equippedScore = math.min(s1, s2)
                     equippedItemLink = string.format("\n    Slot 1: %s (Score: %.2f)\n    Slot 2: %s (Score: %.2f)\n    [Challenging Lowest]", t1Link or "[Empty]", s1, t2Link or "[Empty]", s2)
                 else
                     local standardLink = GetInventoryItemLink("player", foundSlotID)
-                    if standardLink then
-                        equippedScore = CalculateItemScore(standardLink)
-                        equippedItemLink = standardLink
-                    end
+                    if standardLink then equippedScore = CalculateItemScore(standardLink) equippedItemLink = standardLink end
                 end
             end
         end
-
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF3399FF[%s Score]:|r %.2f", itemName, totalDroppedScore))
         if equippedItemLink then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFF0000[Equipped Item Baseline]:|r %.2f (%s)", equippedScore, equippedItemLink))
             local scoreDelta = totalDroppedScore - equippedScore
-            if scoreDelta > 0 then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[STAT UPGRADE!]:|r This item is a +%.2f upgrade over equipped!", scoreDelta))
-            else
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFF2222[NO UPGRADE]:|r This item scores %.2f lower than equipped.", math.abs(scoreDelta)))
-            end
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("|cFF999999[Slot Baseline]:|r Empty slot. This item is an absolute upgrade!")
-        end
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r")
-        scannerTooltip:Hide()
+            if scoreDelta > 0 then DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[STAT UPGRADE!]:|r This item is a +%.2f upgrade over equipped!", scoreDelta))
+            else DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFF2222[NO UPGRADE]:|r This item scores %.2f lower than equipped.", math.abs(scoreDelta))) end
+        else DEFAULT_CHAT_FRAME:AddMessage("|cFF999999[Slot Baseline]:|r Empty slot. This item is an absolute upgrade!") end
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00------------------------------------------------|r") scannerTooltip:Hide()
     end
 end)
+
+
 local debugLogFrame, debugEditBox = nil, nil
 
 function ShowInGameDebugLog(itemLink)
@@ -692,4 +730,10 @@ SLASH_ARCHECK1 = "/archeck"
 SlashCmdList["ARCHECK"] = function(msg)
     if msg and msg ~= "" then ShowInGameDebugLog(msg)
     else DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[AutoRoll]|r Please type /archeck followed by an item link to copy its data!") end
+end
+
+-- Global Client Command Registry: Overrides local scopes to let you open panels hands-free via chat windows
+SLASH_AUTOROLL1 = "/autoroll"
+SlashCmdList["AUTOROLL"] = function() 
+    ToggleUI() 
 end
