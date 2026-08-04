@@ -513,6 +513,13 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         local equippedItemLink = "Slot Combo" 
         local foundSlotID = nil
         
+        local isRangedWeapon = (itemEquipLoc == "INVTYPE_RANGED" or
+            itemEquipLoc == "INVTYPE_RANGEDRIGHT" or
+            itemSubClass == "Bows" or
+            itemSubClass == "Guns" or
+            itemSubClass == "Crossbows" or
+            itemSubClass == "Thrown")
+
         local isWp = (itemEquipLoc == "INVTYPE_WEAPON" or 
             itemEquipLoc == "INVTYPE_2HWEAPON" or 
             itemEquipLoc == "INVTYPE_WEAPONMAINHAND" or 
@@ -525,7 +532,12 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             itemSubClass == "Leather" or 
             itemSubClass == "Mail" or itemSubClass == "Plate")
         
-        if not isArm and isWp then
+        if isRangedWeapon then
+            local rangedLink = GetInventoryItemLink("player", 18)
+            equippedScore = rangedLink and CalculateItemScore(rangedLink) or 0
+            equippedItemLink = rangedLink or "[Empty]"
+            foundSlotID = 18
+        elseif not isArm and isWp then
             local mhLink = GetInventoryItemLink("player", 16) 
             local ohLink = GetInventoryItemLink("player", 17)
             local mhScore = mhLink and CalculateItemScore(mhLink) or 0 

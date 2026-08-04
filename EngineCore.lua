@@ -206,13 +206,33 @@ function ProcessLootRoll(rollID, itemLink)
 end
 
 
+local function IsWeaponSkillRecognized(weaponSubClass, skillTable)
+    if not weaponSubClass or not skillTable then return false end
+    local lowSub = string.lower(weaponSubClass)
+    if skillTable[lowSub] then return true end
+
+    local normalized = lowSub:gsub("[%s%-]+", " ")
+    if string.find(normalized, "sword") and skillTable["swords"] then return true end
+    if string.find(normalized, "mace") and skillTable["maces"] then return true end
+    if string.find(normalized, "axe") and skillTable["axes"] then return true end
+    if string.find(normalized, "dagger") and skillTable["daggers"] then return true end
+    if (string.find(normalized, "staff") or string.find(normalized, "staves")) and skillTable["staves"] then return true end
+    if string.find(normalized, "bow") and skillTable["bows"] then return true end
+    if string.find(normalized, "crossbow") and skillTable["crossbows"] then return true end
+    if string.find(normalized, "gun") and skillTable["guns"] then return true end
+    if string.find(normalized, "fist") and skillTable["fist weapons"] then return true end
+    return false
+end
+
 function IsItemUnusable(itemLink)
     if not itemLink then return false, "StandardGear" end
     local _, _, _, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     local isRecipeItem = (itemType == "Recipe")
     
     -- Safety Check: If background data isn't loaded yet, run a fast fallback sync scan
-    if not playerArmorSkills or not playerWeaponSkills then ScanCharacterSkillsEngine() end
+    local armorSkillsReady = playerArmorSkills ~= nil and next(playerArmorSkills) ~= nil
+    local weaponSkillsReady = playerWeaponSkills ~= nil and next(playerWeaponSkills) ~= nil
+    if not armorSkillsReady or not weaponSkillsReady then ScanCharacterSkillsEngine() end
     
     local unusable = false
     local isAlreadyKnown = false
@@ -228,16 +248,7 @@ function IsItemUnusable(itemLink)
         -- Normalizes specific name variances cleanly into raw weapon class terms
         local matchedWpSkill = false
         if playerWeaponSkills then
-            if playerWeaponSkills[lowSub] then matchedWpSkill = true
-            elseif string.find(lowSub, "sword") and playerWeaponSkills["swords"] then matchedWpSkill = true
-            elseif string.find(lowSub, "mace") and playerWeaponSkills["maces"] then matchedWpSkill = true
-            elseif string.find(lowSub, "axe") and playerWeaponSkills["axes"] then matchedWpSkill = true
-            elseif string.find(lowSub, "dagger") and playerWeaponSkills["daggers"] then matchedWpSkill = true
-            elseif (string.find(lowSub, "staff") or string.find(lowSub, "staves")) and playerWeaponSkills["staves"] then matchedWpSkill = true
-            elseif string.find(lowSub, "bow") and playerWeaponSkills["bows"] then matchedWpSkill = true
-            elseif string.find(lowSub, "crossbow") and playerWeaponSkills["crossbows"] then matchedWpSkill = true
-            elseif string.find(lowSub, "gun") and playerWeaponSkills["guns"] then matchedWpSkill = true
-            elseif string.find(lowSub, "fist") and playerWeaponSkills["fist weapons"] then matchedWpSkill = true end
+            matchedWpSkill = IsWeaponSkillRecognized(itemSubClass, playerWeaponSkills)
         end
         if not matchedWpSkill then unusable = true end
     end
@@ -337,13 +348,13 @@ end
 
 local isLoaded = false
 function InitializeAddon() 
-    if isLoaded then return end isLoaded = true 
     if type(AutoRollConfig) ~= "table" or not AutoRollConfig.classProfiles then AutoRollConfig = nil end
-    if not AutoRollConfig then AutoRollConfig = defaults 
-    else 
+    if not AutoRollConfig then
+        AutoRollConfig = defaults
+    else
         if not AutoRollConfig.charSettings then AutoRollConfig.charSettings = {} end
-        for k, v in pairs(defaults) do if AutoRollConfig[k] == nil then AutoRollConfig[k] = v end end 
-    end 
+        for k, v in pairs(defaults) do if AutoRollConfig[k] == nil then AutoRollConfig[k] = v end end
+    end
     local charKey = GetCharacterUniqueKey()
     if not AutoRollConfig.charSettings[charKey] then AutoRollConfig.charSettings[charKey] = GetBlankCharSettings() end
     local playerClass = GetPlayerClassProfile() local isProfileBlank = true
@@ -369,7 +380,10 @@ function InitializeAddon()
     -- Skills Cache Ingestion: Replaces old manual overrides with live server metrics
     ScanCharacterSkillsEngine()
 
-    BuildLauncherButton() 
+    if not isLoaded then
+        isLoaded = true
+        if not AutoRollLauncherButton then BuildLauncherButton() end
+    end
 end
 
 mainFrame = CreateFrame("Frame")
