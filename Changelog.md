@@ -1,4 +1,4 @@
-# Changelog - AutoRoll v3.2
+# Changelog - AutoRoll v3.3
 
 All notable changes, structural logic corrections, and interface optimization updates to the AutoRoll addon project are documented in this file.
 
