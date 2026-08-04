@@ -470,45 +470,10 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
 
         
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
-        local playerClass = GetPlayerClassProfile() local totalDroppedScore = 0
-        for i = 1, self:NumLines() do
-            local leftLine = _G[self:GetName() .. "TextLeft" .. i] local rawText = leftLine and leftLine:GetText() or ""
-            if rawText ~= "" and not string.find(rawText, "Set:") and not string.find(rawText, "%(%d+%)%s*Set") then
-                for text in string.gmatch(rawText, "[^\r\n]+") do
-                    local lineMatched = false
-                    for _, item in ipairs(STAT_PATTERNS) do
-                        local weight = 0
-                        if AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
-                            weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
-                        end
-                        local cleanPat = nil
-                        if item.key == "Strength" then cleanPat = "%+(%d+)%s*[Ss]trength"
-                        elseif item.key == "Agility" then cleanPat = "%+(%d+)%s*[Aa]gility"
-                        elseif item.key == "Stamina" then cleanPat = "%+(%d+)%s*[Ss]tamina"
-                        elseif item.key == "Intellect" then cleanPat = "%+(%d+)%s*[Ii]ntellect"
-                        elseif item.key == "Spirit" then cleanPat = "%+(%d+)%s*[Ss]pirit"
-                        elseif item.key == "Haste" then cleanPat = "%+(%d+)%s*[Hh]aste" end
-                        
-                        if cleanPat then
-                            local match = string.match(text, cleanPat)
-                            if match then
-                                local value = tonumber(match) or 0 local lineScore = value * weight totalDroppedScore = totalDroppedScore + lineScore
-                                DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore)) break
-                            end
-                        else
-                            for _, pattern in ipairs(item.pats) do
-                                local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "") local match = string.match(text, cleanPattern)
-                                if match then
-                                    local value = tonumber(match) or 0 local lineScore = value * weight totalDroppedScore = totalDroppedScore + lineScore lineMatched = true
-                                    DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", item.key, value, weight, lineScore)) break
-                                end
-                            end
-                        end
-                        if lineMatched then break end
-                    end
-                end
-            end
-        end
+        local playerClass = GetPlayerClassProfile()
+        local isRangedItemHover = (itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or
+            itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Thrown")
+        local totalDroppedScore = ScoreTooltipLines(self, playerClass, isRangedItemHover, true)
         local equippedScore = 0 
         local equippedItemLink = "Slot Combo" 
         local foundSlotID = nil
@@ -540,77 +505,25 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         elseif not isArm and isWp then
             local mhLink = GetInventoryItemLink("player", 16) 
             local ohLink = GetInventoryItemLink("player", 17)
-            local mhScore = mhLink and CalculateItemScore(mhLink) or 0 
-            local ohScore = ohLink and CalculateItemScore(ohLink) or 0
-            
+            local mhScore, ohScore = 0, 0
+
+            if mhLink then
+                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Main-Hand Stats...]|r")
+                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(mhLink)
+                mhScore = ScoreTooltipLines(scannerTooltip, playerClass, false, true, "(MH)")
+                scannerTooltip:Hide()
+            end
+            if ohLink then
+                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Off-Hand/Shield Stats...]|r")
+                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(ohLink)
+                ohScore = ScoreTooltipLines(scannerTooltip, playerClass, false, true, "(OH)")
+                scannerTooltip:Hide()
+            end
+
             equippedScore = mhScore + ohScore 
             equippedItemLink = string.format("MH: %s + OH: %s", 
                 mhLink or "[Empty]", ohLink or "[Empty]")
-                
-            if mhLink and mhScore > 0 then
-                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Main-Hand Stats...]|r")
-                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") 
-                scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(mhLink)
-                for i = 1, scannerTooltip:NumLines() do
-                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i] 
-                    local rTxt = lLine and lLine:GetText() or ""
-                    if rTxt ~= "" and not string.find(rTxt, "Set:") and not string.find(rTxt, "%(%d+%)%s*Set") then
-                        for text in string.gmatch(rTxt, "[^\r\n]+") do
-                            for _, item in ipairs(STAT_PATTERNS) do
-                                local w = (AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] and AutoRollConfig.classProfiles[playerClass][item.key]) or 0
-                                local cleanPat = nil
-                                if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
-                                elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
-                                elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
-                                elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit" end
-                                if cleanPat then
-                                    local m = string.match(text, cleanPat)
-                                    if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
-                                else
-                                    for _, pattern in ipairs(item.pats) do
-                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "") 
-                                        local m = string.match(text, cleanPattern)
-                                        if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(MH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            if ohLink and ohScore > 0 then
-                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Off-Hand/Shield Stats...]|r")
-                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") 
-                scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(ohLink)
-                for i = 1, scannerTooltip:NumLines() do
-                    local lLine = _G["AutoRollScannerTooltipTextLeft" .. i] 
-                    local rTxt = lLine and lLine:GetText() or ""
-                    if rTxt ~= "" and not string.find(rTxt, "Set:") and not string.find(rTxt, "%(%d+%)%s*Set") then
-                        for text in string.gmatch(rTxt, "[^\r\n]+") do
-                            for _, item in ipairs(STAT_PATTERNS) do
-                                local w = (AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] and AutoRollConfig.classProfiles[playerClass][item.key]) or 0
-                                local cleanPat = nil
-                                if item.key == "Strength" then cleanPat = "(%d+)%s*[Ss]trength"
-                                elseif item.key == "Agility" then cleanPat = "(%d+)%s*[Aa]gility"
-                                elseif item.key == "Stamina" then cleanPat = "(%d+)%s*[Ss]tamina"
-                                elseif item.key == "Intellect" then cleanPat = "(%d+)%s*[Ii]ntellect"
-                                elseif item.key == "Spirit" then cleanPat = "(%d+)%s*[Ss]pirit" end
-                                if cleanPat then
-                                    local m = string.match(text, cleanPat)
-                                    if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
-                                else
-                                    for _, pattern in ipairs(item.pats) do
-                                        local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "") 
-                                        local m = string.match(text, cleanPattern)
-                                        if m then DEFAULT_CHAT_FRAME:AddMessage(string.format("    |cFF999999(OH)|r \"%s\" -> |cFF00FF00+%s Score|r", text, tostring((tonumber(m) or 0) * w))) break end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+
             if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" then totalDroppedScore = totalDroppedScore + ohScore
             elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemSubClass == "Shields" then totalDroppedScore = mhScore + totalDroppedScore end
             foundSlotID = 16

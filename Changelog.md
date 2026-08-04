@@ -1,6 +1,18 @@
-# Changelog - AutoRoll v3.1
+# Changelog - AutoRoll v3.2
 
 All notable changes, structural logic corrections, and interface optimization updates to the AutoRoll addon project are documented in this file.
+
+---
+
+## [3.2] - Live Sync & Scoring Accuracy Release
+
+### Fixed
+- **Live Skill Synchronization:** The `SKILL_LINES_CHANGED` event handler existed in the event dispatcher but was never actually registered with the client, so armor/weapon proficiency and profession caches only ever refreshed at login. Training a new weapon skill or profession mid-session now updates AutoRoll's cache immediately instead of requiring a relog.
+- **Ranged Weapon Scoring Collision:** The `Ranged DPS` stat pattern required the literal word "Ranged" to appear on the same tooltip line as the DPS value, which never happens on a real bow/gun/crossbow tooltip. As a result, ranged weapons were always scored under the melee `Weapon DPS` weight instead of your class profile's dedicated `Ranged DPS` weight. Scoring now detects ranged weapons by equip slot and item subclass and applies the correct weight.
+- **Ctrl + Hover Diagnostic Column Parity:** The in-game hover diagnostic only read the tooltip's left text column, while the actual auto-roll scoring engine reads both columns. The diagnostic now reads both, so what you see when hovering an item always matches the score AutoRoll actually used to make its roll decision.
+
+### Changed
+- **Unified Scoring Engine:** The stat-pattern matching logic previously existed as three separate copies across `EngineCore.lua` and `InterfaceGUI.lua` (item scoring, hover diagnostics, and equipped weapon breakdown), which had already drifted out of sync with each other (the root cause of the column-parity bug above). All three now call a single shared `ScoreTooltipLines` function, so future changes to scoring logic only need to happen in one place.
 
 ---
 

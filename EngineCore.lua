@@ -41,7 +41,7 @@ STAT_PATTERNS = {
     { key = "Spell Pen", pats = { "spell penetration by (%d+)", "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)" } },
     { key = "Expertise", pats = { "expertise rating by (%d+)", "expertise rating", "Expertise", "Improves expertise rating by (%d+)" } },
     { key = "Weapon DPS", pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
-    { key = "Ranged DPS", pats = { "Ranged.*((%d+%.?%d*)) damage per second" } },
+    { key = "Ranged DPS", pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
     { key = "Resilience", pats = { "resilience rating by (%d+)", "resilience rating", "Resilience" } },
     { key = "Mana per 5", pats = { "mana per 5 sec", "Restores (%d+) mana per 5", "mana per 5 seconds" } }
 }
@@ -78,20 +78,32 @@ function GetCharacterUniqueKey()
     return (name and realm) and (name .. " - " .. realm) or "UnknownCharacter"
 end
 
-function CalculateItemScore(itemLink)
-    local playerClass = GetPlayerClassProfile()
-    if not itemLink or not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then return 0 end
-    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(itemLink)
+-- =========================================================================
+-- SHARED SCORING ENGINE: Single source of truth for reading a populated
+-- tooltip's lines and turning them into a class-weighted score. Used by
+-- CalculateItemScore below, and by the Ctrl+Hover diagnostic and equipped
+-- weapon breakdown in InterfaceGUI.lua, so all three always agree.
+--   tooltipFrame  - a GameTooltip-type frame that already has SetHyperlink
+--                    (or SetItem) called on it
+--   playerClass   - the class key into AutoRollConfig.classProfiles
+--   isRangedItem  - true if the item is a bow/gun/crossbow/thrown/ranged slot
+--   verbose       - if true, prints each matched stat line to chat
+--   linePrefix    - optional chat-log tag, e.g. "(MH)" or "(OH)"
+-- =========================================================================
+function ScoreTooltipLines(tooltipFrame, playerClass, isRangedItem, verbose, linePrefix)
     local totalScore = 0
-    for i = 1, scannerTooltip:NumLines() do
-        local leftLine = _G["AutoRollScannerTooltipTextLeft" .. i] local rightLine = _G["AutoRollScannerTooltipTextRight" .. i]
+    local profile = AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass]
+    local tipName = tooltipFrame:GetName()
+    for i = 1, tooltipFrame:NumLines() do
+        local leftLine = _G[tipName .. "TextLeft" .. i] local rightLine = _G[tipName .. "TextRight" .. i]
         local rawTextLeft = leftLine and leftLine:GetText() or "" local rawTextRight = rightLine and rightLine:GetText() or ""
         if (rawTextLeft ~= "" and not string.find(rawTextLeft, "Set:") and not string.find(rawTextLeft, "%(%d+%)%s*Set")) or (rawTextRight ~= "" and not string.find(rawTextRight, "Set:")) then
             local combinedText = rawTextLeft .. "\n" .. rawTextRight
             for text in string.gmatch(combinedText, "[^\r\n]+") do
                 for _, item in ipairs(STAT_PATTERNS) do
-                    local weight = AutoRollConfig.classProfiles[playerClass][item.key] or 0
-                    if weight > 0 then
+                    local weight = (profile and profile[item.key]) or 0
+                    local skipDpsMismatch = (item.key == "Weapon DPS" and isRangedItem) or (item.key == "Ranged DPS" and not isRangedItem)
+                    if weight > 0 and not skipDpsMismatch then
                         local cleanPat = nil
                         if item.key == "Strength" then cleanPat = "%+(%d+)%s*[Ss]trength"
                         elseif item.key == "Agility" then cleanPat = "%+(%d+)%s*[Aa]gility"
@@ -100,14 +112,23 @@ function CalculateItemScore(itemLink)
                         elseif item.key == "Spirit" then cleanPat = "%+(%d+)%s*[Ss]pirit"
                         elseif item.key == "Haste" then cleanPat = "%+(%d+)%s*[Hh]aste" end
 
+                        local matchVal = nil
                         if cleanPat then
                             local match = string.match(text, cleanPat)
-                            if match and tonumber(match) then totalScore = totalScore + (tonumber(match) * weight) end
+                            if match and tonumber(match) then matchVal = tonumber(match) end
                         else
                             for _, pattern in ipairs(item.pats) do
                                 local cleanPattern = pattern:gsub("%%%+", ""):gsub("%^", "")
                                 local match = string.match(text, cleanPattern)
-                                if match and tonumber(match) then totalScore = totalScore + (tonumber(match) * weight) break end
+                                if match and tonumber(match) then matchVal = tonumber(match) break end
+                            end
+                        end
+
+                        if matchVal then
+                            local lineScore = matchVal * weight
+                            totalScore = totalScore + lineScore
+                            if verbose then
+                                DEFAULT_CHAT_FRAME:AddMessage(string.format("  %s|cFF3399FFKey:|r %s, |cFF00FF00Val:|r %s, |cFFFF9900Weight:|r %s (|cFF00FF00Score:+%.2f|r)", linePrefix or "", item.key, matchVal, weight, lineScore))
                             end
                         end
                     end
@@ -115,6 +136,17 @@ function CalculateItemScore(itemLink)
             end
         end
     end
+    return totalScore
+end
+
+function CalculateItemScore(itemLink)
+    local playerClass = GetPlayerClassProfile()
+    if not itemLink or not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then return 0 end
+    local _, _, _, _, _, _, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
+    local isRangedItem = (itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or
+        itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Thrown")
+    scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(itemLink)
+    local totalScore = ScoreTooltipLines(scannerTooltip, playerClass, isRangedItem, false)
     scannerTooltip:Hide() return totalScore
 end
 
@@ -389,6 +421,7 @@ end
 mainFrame = CreateFrame("Frame")
 mainFrame:RegisterEvent("ADDON_LOADED") mainFrame:RegisterEvent("PLAYER_LOGIN")
 mainFrame:RegisterEvent("START_LOOT_ROLL") mainFrame:RegisterEvent("CANCEL_LOOT_ROLL")
+mainFrame:RegisterEvent("SKILL_LINES_CHANGED")
 mainFrame:SetScript("OnEvent", function(self, event, arg1) 
     if event == "ADDON_LOADED" and arg1 == "AutoRoll" then pcall(InitializeAddon) 
     elseif event == "PLAYER_LOGIN" or event == "SKILL_LINES_CHANGED" then

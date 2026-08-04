@@ -1,4 +1,4 @@
-# AutoRoll v3.2
+# AutoRoll v3.2 (Live Sync & Scoring Accuracy Release)
 
 AutoRoll is an ultra-lightweight, event-driven automatic loot evaluation and rolling suite engineered specifically for World of Warcraft private server frameworks (optimized for the *Conquest of Azeroth* / *Ascension* Vanilla/TBC client layout). 
 
@@ -63,7 +63,7 @@ To completely safeguard usable gear upgrades from being swept away by general co
   - Fires only as a final safety cushion for items that didn't match any specific slot rules higher up.
   - Applies broad background choices from your `Green`, `Blue`, and `Purple` dropdown settings.
 ### 2. Dynamic Server-Skills Synchronization Engine
-Dumps legacy color tracking. The addon queries the game's native skills database via `GetSkillLineInfo` to cache your character's real-time `Armor Proficiencies` and `Weapon Skills` lists. If an item drops that isn't in your cache (like Plate on a Tinker), it flags it unusable across all systems instantly.
+Dumps legacy color tracking. The addon queries the game's native skills database via `GetSkillLineInfo` to cache your character's real-time `Armor Proficiencies` and `Weapon Skills` lists. If an item drops that isn't in your cache (like Plate on a Tinker), it flags it unusable across all systems instantly. This cache now refreshes automatically the moment your skills change in-game (training a new weapon type, leveling a profession, etc.), not just at login.
 
 ### 3. Asymmetric Multi-Slot & Pairing Logic
 * **Rings & Trinkets:** Queries both equipped gear positions simultaneously, locks onto whichever item carries the absolute lowest stat value score as a baseline challenge, and evaluates the dropped item against your weakest link.
@@ -91,4 +91,4 @@ AutoRoll includes a sleek, space-saving options dashboard accessible via `/autor
 Type `/archeck ` followed by a **Shift-Click** on any item link to open up the interactive Copyable Diagnostic Inspector. The window opens with the item's raw text lines completely pre-highlighted in blue, allowing you to hit **`Ctrl + C`** right away to copy clean data rows straight to your computer's clipboard for rapid filtering review.
 
 ### `Ctrl + Hover` Chat Diagnostics
-Hold down your keyboard's **`Ctrl`** key while hovering over any piece of gear inside your inventory bags or loot frames to stream a comprehensive mathematical stat breakdown directly into your chat log window, displaying exactly what regex patterns matched and which class profile weights were used to calculate the score. If the item is unwearable based on your skills cache, it skips the math entirely and throws a clean, prominent `[UNEQUIPPABLE]` warning banner instead.
+Hold down your keyboard's **`Ctrl`** key while hovering over any piece of gear inside your inventory bags or loot frames to stream a comprehensive mathematical stat breakdown directly into your chat log window, displaying exactly what regex patterns matched and which class profile weights were used to calculate the score. If the item is unwearable based on your skills cache, it skips the math entirely and throws a clean, prominent `[UNEQUIPPABLE]` warning banner instead. This diagnostic now shares the exact same scoring engine as the live auto-roll logic, so the number you see on hover is guaranteed to match the number AutoRoll actually rolled on.
