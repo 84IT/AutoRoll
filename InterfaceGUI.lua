@@ -468,9 +468,19 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             return
         end
 
-        
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
         local playerClass = GetPlayerClassProfile()
+        local function PrintEquippedItemScore(equipLink, label, isRanged)
+            if not equipLink then return 0 end
+            DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped " .. label .. " Stats...]|r")
+            scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+            scannerTooltip:ClearLines()
+            scannerTooltip:SetHyperlink(equipLink)
+            local score = ScoreTooltipLines(scannerTooltip, playerClass, isRanged, true, "(Equipped)")
+            scannerTooltip:Hide()
+            return score
+        end
+
         local isRangedItemHover = (itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or
             itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Thrown")
         local totalDroppedScore = ScoreTooltipLines(self, playerClass, isRangedItemHover, true)
@@ -499,7 +509,7 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         
         if isRangedWeapon then
             local rangedLink = GetInventoryItemLink("player", 18)
-            equippedScore = rangedLink and CalculateItemScore(rangedLink) or 0
+            equippedScore = PrintEquippedItemScore(rangedLink, "Ranged Slot", true)
             equippedItemLink = rangedLink or "[Empty]"
             foundSlotID = 18
         elseif not isArm and isWp then
@@ -508,16 +518,10 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             local mhScore, ohScore = 0, 0
 
             if mhLink then
-                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Main-Hand Stats...]|r")
-                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(mhLink)
-                mhScore = ScoreTooltipLines(scannerTooltip, playerClass, false, true, "(MH)")
-                scannerTooltip:Hide()
+                mhScore = PrintEquippedItemScore(mhLink, "Main-Hand", false)
             end
             if ohLink then
-                DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped Off-Hand/Shield Stats...]|r")
-                scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(ohLink)
-                ohScore = ScoreTooltipLines(scannerTooltip, playerClass, false, true, "(OH)")
-                scannerTooltip:Hide()
+                ohScore = PrintEquippedItemScore(ohLink, "Off-Hand/Shield", false)
             end
 
             equippedScore = mhScore + ohScore 
@@ -551,17 +555,24 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
             if foundSlotID then
                 if foundSlotID == 11 or itemEquipLoc == "INVTYPE_FINGER" then
                     local r1Link = GetInventoryItemLink("player", 11) local r2Link = GetInventoryItemLink("player", 12)
-                    local s1 = r1Link and CalculateItemScore(r1Link) or 0 local s2 = r2Link and CalculateItemScore(r2Link) or 0
+                    local s1 = r1Link and PrintEquippedItemScore(r1Link, "Finger Slot 1", false) or 0 local s2 = r2Link and PrintEquippedItemScore(r2Link, "Finger Slot 2", false) or 0
                     equippedScore = math.min(s1, s2)
                     equippedItemLink = string.format("\n    Slot 1: %s (Score: %.2f)\n    Slot 2: %s (Score: %.2f)\n    [Challenging Lowest]", r1Link or "[Empty]", s1, r2Link or "[Empty]", s2)
                 elseif foundSlotID == 12 or itemEquipLoc == "INVTYPE_TRINKET" then
                     local t1Link = GetInventoryItemLink("player", 13) local t2Link = GetInventoryItemLink("player", 14)
-                    local s1 = t1Link and CalculateItemScore(t1Link) or 0 local s2 = t2Link and CalculateItemScore(t2Link) or 0
+                    local s1 = t1Link and PrintEquippedItemScore(t1Link, "Trinket Slot 1", false) or 0 local s2 = t2Link and PrintEquippedItemScore(t2Link, "Trinket Slot 2", false) or 0
                     equippedScore = math.min(s1, s2)
                     equippedItemLink = string.format("\n    Slot 1: %s (Score: %.2f)\n    Slot 2: %s (Score: %.2f)\n    [Challenging Lowest]", t1Link or "[Empty]", s1, t2Link or "[Empty]", s2)
                 else
                     local standardLink = GetInventoryItemLink("player", foundSlotID)
-                    if standardLink then equippedScore = CalculateItemScore(standardLink) equippedItemLink = standardLink end
+                    if standardLink then
+                        equippedItemLink = standardLink
+                        if standardLink == itemLink then
+                            equippedScore = totalDroppedScore
+                        else
+                            equippedScore = PrintEquippedItemScore(standardLink, "Equipped Slot", isRangedItemHover)
+                        end
+                    end
                 end
             end
         end

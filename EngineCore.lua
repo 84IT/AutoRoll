@@ -59,12 +59,28 @@ function GetBlankCharSettings()
         enabled = true, timeThreshold = 5, autoGreedUnusable = true, bulkArmor = 0, bulkWeapons = 0, bulkQuality = 0,
         armor = { ["Cloth"] = 0, ["Leather"] = 0, ["Mail"] = 0, ["Plate"] = 0, ["Shields"] = 0 },
         weapons = { ["Daggers"] = 0, ["One-Handed Swords"] = 0, ["Two-Handed Swords"] = 0, ["One-Handed Maces"] = 0, ["Two-Handed Maces"] = 0, ["One-Handed Axes"] = 0, ["Two-Handed Axes"] = 0, ["Staves"] = 0, ["Fist Weapons"] = 0, ["Polearms"] = 0, ["Wands"] = 0, ["Bows"] = 0, ["Guns"] = 0, ["Crossbows"] = 0, ["Thrown"] = 0 },
-        quality = { ["Green"] = 0, ["Blue"] = 0, ["Purple"] = 0 }, statModuleEnabled = false
+        quality = { ["Green"] = 0, ["Blue"] = 0, ["Purple"] = 0 }, statModuleEnabled = false, smartStatsDelay = 1.0
     }
 end
 
 defaults = { buttonX = 0, buttonY = 150, classProfiles = {}, charSettings = {} }
 scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
+local SMART_STATS_DELAY_SECONDS = 1.0
+
+local function QueueRollProcessing(rollID, itemLink, delaySeconds, reason)
+    local delayFrame = CreateFrame("Frame")
+    local elapsed = 0
+    delayFrame:SetScript("OnUpdate", function(f, delta)
+        elapsed = elapsed + delta
+        if elapsed >= delaySeconds then
+            f:SetScript("OnUpdate", nil)
+            pcall(ProcessLootRoll, rollID, itemLink)
+        end
+    end)
+    if reason then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Delay]|r %s: waiting %.2f seconds before evaluating roll.", reason, delaySeconds))
+    end
+end
 
 function GetPlayerClassProfile()
     local localClassName, _ = UnitClass("player")
@@ -150,6 +166,56 @@ function CalculateItemScore(itemLink)
     scannerTooltip:Hide() return totalScore
 end
 
+function GetStatModuleComparisonScores(itemLink, itemType, itemSubClass, itemEquipLoc)
+    local playerClass = GetPlayerClassProfile()
+    if not itemLink or not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then
+        return 0, 0
+    end
+
+    local candidateScore = CalculateItemScore(itemLink)
+    local equippedScore = 0
+    local isRangedItem = (itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or
+        itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Thrown")
+    local isWeaponItem = itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" or
+        itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or itemSubClass == "Guns" or
+        itemSubClass == "Bows" or itemSubClass == "Crossbows" or itemSubClass == "Thrown"
+    local isArmorPiece = itemSubClass == "Cloth" or itemSubClass == "Leather" or itemSubClass == "Mail" or itemSubClass == "Plate"
+
+    if isRangedItem then
+        local rangedLink = GetInventoryItemLink("player", 18)
+        equippedScore = rangedLink and CalculateItemScore(rangedLink) or 0
+    elseif isWeaponItem and not isArmorPiece then
+        local mhLink = GetInventoryItemLink("player", 16)
+        local ohLink = GetInventoryItemLink("player", 17)
+        local mhScore = mhLink and CalculateItemScore(mhLink) or 0
+        local ohScore = ohLink and CalculateItemScore(ohLink) or 0
+        equippedScore = mhScore + ohScore
+        if itemEquipLoc == "INVTYPE_WEAPON" or itemEquipLoc == "INVTYPE_WEAPONMAINHAND" then
+            candidateScore = candidateScore + ohScore
+        elseif itemEquipLoc == "INVTYPE_SHIELD" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_WEAPONOFFHAND" or itemSubClass == "Shields" then
+            candidateScore = mhScore + candidateScore
+        end
+    elseif itemEquipLoc == "INVTYPE_FINGER" then
+        local r1Link = GetInventoryItemLink("player", 11)
+        local r2Link = GetInventoryItemLink("player", 12)
+        local s1 = r1Link and CalculateItemScore(r1Link) or 0
+        local s2 = r2Link and CalculateItemScore(r2Link) or 0
+        equippedScore = math.min(s1, s2)
+    elseif itemEquipLoc == "INVTYPE_TRINKET" then
+        local t1Link = GetInventoryItemLink("player", 13)
+        local t2Link = GetInventoryItemLink("player", 14)
+        local s1 = t1Link and CalculateItemScore(t1Link) or 0
+        local s2 = t2Link and CalculateItemScore(t2Link) or 0
+        equippedScore = math.min(s1, s2)
+    elseif itemEquipLoc and SLOT_MAP[itemEquipLoc] then
+        local slotID = SLOT_MAP[itemEquipLoc]
+        local equippedItemLink = GetInventoryItemLink("player", slotID)
+        equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
+    end
+
+    return candidateScore, equippedScore
+end
+
 function ProcessLootRoll(rollID, itemLink)
     if not AutoRollConfig or not AutoRollConfig.charSettings then return end
     local charKey = GetCharacterUniqueKey() local cCfg = AutoRollConfig.charSettings[charKey]
@@ -157,7 +223,9 @@ function ProcessLootRoll(rollID, itemLink)
     local playerClass = GetPlayerClassProfile()
     local itemName, _, itemRarity, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     if not itemName then return end
-    
+    local rollNames = { [1] = "Need", [2] = "Greed", [3] = "Pass" }
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[AutoRoll Trace]|r Evaluating %s: type=%s subclass=%s equip=%s", itemLink, itemType or "nil", itemSubClass or "nil", itemEquipLoc or "nil"))
+
     local rarityKey = nil
     if itemRarity == 2 then rarityKey = "Green" elseif itemRarity == 3 then rarityKey = "Blue" elseif itemRarity == 4 then rarityKey = "Purple" end
     -- =========================================================================
@@ -178,6 +246,7 @@ function ProcessLootRoll(rollID, itemLink)
     if isRecipeItem then isUnusable, recipeState = IsItemUnusable(itemLink) end
     if isRecipeItem and recipeState == "UnknownUsableRecipe" then
         if alertTextString then alertTextString:SetText("|cFF3399FFRecipe Sniper: NEED|r") end
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Recipe auto-roll -> %s", itemLink))
         if ExecuteRollChoice(rollID, 1, itemLink, "Unknown Usable Recipe") then return end
     end
 
@@ -190,10 +259,11 @@ function ProcessLootRoll(rollID, itemLink)
     -- PRIORITY 2: SMART STATS UPGRADE TRACKER (Prioritizes item slot upgrades)
     -- =========================================================================
     if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
-        local slotID = SLOT_MAP[itemEquipLoc] local equippedItemLink = GetInventoryItemLink("player", slotID)
-        local droppedScore = CalculateItemScore(itemLink) local equippedScore = equippedItemLink and CalculateItemScore(equippedItemLink) or 0
+        local droppedScore, equippedScore = GetStatModuleComparisonScores(itemLink, itemType, itemSubClass, itemEquipLoc)
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Stat compare -> candidate=%.2f equipped=%.2f", droppedScore, equippedScore))
         if droppedScore > equippedScore then 
             if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Stat auto-roll -> %s [Need], delta=%.2f", itemLink, droppedScore - equippedScore))
             if ExecuteRollChoice(rollID, 1, itemLink, string.format("Upgrade Over Equipped: +%.2f Pts", droppedScore - equippedScore)) then return end
         end
     end
@@ -203,15 +273,28 @@ function ProcessLootRoll(rollID, itemLink)
     -- =========================================================================
     if (itemType == "Armor" or itemSubClass == "Shields") and cCfg.armor then
         local aChoice = 0 if cCfg.bulkArmor and cCfg.bulkArmor > 0 then aChoice = cCfg.bulkArmor else aChoice = cCfg.armor[itemSubClass] or 0 end
-        if aChoice > 0 then if ExecuteRollChoice(rollID, aChoice, itemLink, "Armor Filter: " .. itemSubClass) then return end end
+        if aChoice > 0 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Armor filter auto-roll -> %s, action=%s", itemSubClass or "Unknown", rollNames[aChoice] or tostring(aChoice)))
+            if ExecuteRollChoice(rollID, aChoice, itemLink, "Armor Filter: " .. itemSubClass) then return end
+        end
     end
     if itemType == "Weapon" or itemSubClass == "Shields" or itemEquipLoc == "INVTYPE_HOLDABLE" or itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or itemSubClass == "Guns" or itemSubClass == "Bows" or itemSubClass == "Crossbows" or itemSubClass == "Thrown" then
-        if cCfg.weapons and cCfg.weapons[itemSubClass] and cCfg.weapons[itemSubClass] > 0 then if ExecuteRollChoice(rollID, cCfg.weapons[itemSubClass], itemLink, "Weapon Auto Filter: " .. itemSubClass) then return end end
+        if cCfg.weapons and cCfg.weapons[itemSubClass] and cCfg.weapons[itemSubClass] > 0 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Weapon filter auto-roll -> %s, action=%s", itemSubClass or "Unknown", rollNames[cCfg.weapons[itemSubClass]] or tostring(cCfg.weapons[itemSubClass])))
+            if ExecuteRollChoice(rollID, cCfg.weapons[itemSubClass], itemLink, "Weapon Auto Filter: " .. itemSubClass) then return end
+        end
         local hasQualityRule = rarityKey and cCfg.quality and ((cCfg.bulkQuality and cCfg.bulkQuality > 0) or (cCfg.quality[rarityKey] or 0) > 0)
         if not hasQualityRule then
-            local droppedScore = CalculateItemScore(itemLink)
-            if alertTextString then alertTextString:SetText("|cFFFFD100Weapon dropped! Manual pause.|r") end
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore)) return 
+            if isUnusable and cCfg.autoGreedUnusable then
+                local finalRollType = "Greed"
+                if not cCfg.autoGreedUnusable then finalRollType = "Pass" end
+                if alertTextString then alertTextString:SetText("|cFFFF0000Auto-Greed unusable weapon override active.|r") end
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s is unusable and Auto-Greed Unusable is enabled. Final unusable fallback will handle the roll as %s.", itemLink, finalRollType))
+            else
+                local droppedScore = CalculateItemScore(itemLink)
+                if alertTextString then alertTextString:SetText("|cFFFFD100Weapon dropped! Manual pause.|r") end
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Override]|r Weapon piece dropped: %s (|cFF00FF00Score: %.2f|r). Auto-rolling paused so you can choose manually!", itemLink, droppedScore)) return 
+            end
         end
     end
     if itemType == "Weapon" and cCfg.weapons then
@@ -224,7 +307,10 @@ function ProcessLootRoll(rollID, itemLink)
     -- =========================================================================
     if rarityKey and cCfg.quality then
         local qChoice = 0 if cCfg.bulkQuality and cCfg.bulkQuality > 0 then qChoice = cCfg.bulkQuality else qChoice = cCfg.quality[rarityKey] or 0 end
-        if qChoice > 0 then if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end end
+        if qChoice > 0 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Quality filter auto-roll -> %s rarity, action=%s", rarityKey, rollNames[qChoice] or tostring(qChoice)))
+            if ExecuteRollChoice(rollID, qChoice, itemLink, "Quality Filter: " .. rarityKey) then return end
+        end
     end
 
     -- =========================================================================
@@ -233,6 +319,7 @@ function ProcessLootRoll(rollID, itemLink)
     if isUnusable then
         local fallbackAction = cCfg.autoGreedUnusable and 2 or 3
         local fallbackReason = cCfg.autoGreedUnusable and "Unusable Greed Catch" or "Unusable Pass Exclusion"
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Unusable fallback auto-roll -> action=%s", rollNames[fallbackAction] or tostring(fallbackAction)))
         if ExecuteRollChoice(rollID, fallbackAction, itemLink, fallbackReason) then return end
     end
 end
@@ -442,7 +529,7 @@ mainFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "START_LOOT_ROLL" then 
         local rollID = arg1 local itemLink = GetLootRollItemLink(rollID) handledRolls[rollID] = false 
         if itemLink then 
-            local itemName = GetItemInfo(itemLink)
+            local itemName, _, _, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
             if not itemName then
                 local retryFrame = CreateFrame("Frame") local elapsed = 0
                 retryFrame:SetScript("OnUpdate", function(f, delta)
@@ -450,7 +537,17 @@ mainFrame:SetScript("OnEvent", function(self, event, arg1)
                     if GetItemInfo(itemLink) then pcall(ProcessLootRoll, rollID, itemLink) retryFrame:SetScript("OnUpdate", nil)
                     elseif elapsed > 2.0 then retryFrame:SetScript("OnUpdate", nil) end
                 end)
-            else pcall(ProcessLootRoll, rollID, itemLink) end
+            else
+                local charKey = GetCharacterUniqueKey()
+                local cCfg = AutoRollConfig and AutoRollConfig.charSettings and AutoRollConfig.charSettings[charKey]
+                local isGearLikeItem = itemEquipLoc and SLOT_MAP[itemEquipLoc]
+                if cCfg and cCfg.statModuleEnabled and isGearLikeItem then
+                    local delaySeconds = tonumber(cCfg.smartStatsDelay) or SMART_STATS_DELAY_SECONDS
+                    QueueRollProcessing(rollID, itemLink, delaySeconds, "Smart stats evaluation")
+                else
+                    pcall(ProcessLootRoll, rollID, itemLink)
+                end
+            end
         end 
     elseif event == "CANCEL_LOOT_ROLL" then handledRolls[arg1] = nil end 
 end)
