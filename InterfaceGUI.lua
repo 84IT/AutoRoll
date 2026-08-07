@@ -108,40 +108,59 @@ function BuildWeightEditUI()
     if weightFrame or not AutoRollConfig then return end
     
     local editBoxesTable = {}
-    local playerClass = GetPlayerClassProfile()
+    local charClass = GetPlayerClassProfile()
+    local activeProfile = GetActiveProfileName()
+    local showAllClasses = false
     local isUpdating = false
+    local profileDropdown, renameBtn, deleteBtn
     
-    if not AutoRollConfig.classProfiles then AutoRollConfig.classProfiles = {} end
-    if not AutoRollConfig.classProfiles[playerClass] then AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable() end
-    
-    local isProfileBlank = true
-    for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do
-        if v and tonumber(v) ~= 0 then isProfileBlank = false break end
+    local function LoadTempWeightsFromActiveProfile()
+        EnsureProfileExists(activeProfile)
+        for k, v in pairs(AutoRollConfig.statProfiles[activeProfile]) do tempWeights[k] = tonumber(v) or 0 end
     end
-    
-    if isProfileBlank and AutoRoll_ClassTemplates then
-        local foundTemplate = nil
-        for templateName, templateData in pairs(AutoRoll_ClassTemplates) do
-            if string.lower(templateName) == string.lower(playerClass) then foundTemplate = templateData break end
-        end
-        if foundTemplate then
-            for k, v in pairs(foundTemplate) do AutoRollConfig.classProfiles[playerClass][k] = v end
-        end
-    end
-    
-    for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do tempWeights[k] = tonumber(v) or 0 end
+    LoadTempWeightsFromActiveProfile()
     
     weightFrame = CreateFrame("Frame", "AutoRollWeightFrame", UIParent) 
-    weightFrame:SetSize(280, 480) 
+    weightFrame:SetSize(300, 540) 
     weightFrame:SetPoint("TOPLEFT", statFrame, "BOTTOMLEFT", 0, -5)
     weightFrame:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 5, right = 5, top = 5, bottom = 5 } })
     
     local title = weightFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal") 
-    title:SetPoint("TOP", 0, -15) title:SetText("|cFF3399FFModify weights: " .. playerClass .. "|r")
+    title:SetPoint("TOP", 0, -15) title:SetText("|cFF3399FFModify weights: " .. activeProfile .. "|r")
     
     local close = CreateFrame("Button", nil, weightFrame, "UIPanelCloseButton") close:SetPoint("TOPRIGHT", -2, -2)
+    
+    -- =====================================================================
+    -- PROFILE SELECTOR: Lets a character use any named profile from the
+    -- shared account-wide library, not just the one matching its own class.
+    -- Defaults to showing only profiles relevant to this character's class.
+    -- =====================================================================
+    local profileLbl = weightFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    profileLbl:SetPoint("TOPLEFT", weightFrame, "TOPLEFT", 15, -38) profileLbl:SetText("Profile:")
+    
+    profileDropdown = CreateFrame("Frame", "AutoRollProfileDropdown", weightFrame, "UIDropDownMenuTemplate")
+    profileDropdown:SetPoint("TOPLEFT", weightFrame, "TOPLEFT", 45, -31)
+    UIDropDownMenu_SetWidth(profileDropdown, 165)
+    
+    local allClassesCB = CreateFrame("CheckButton", "AutoRollShowAllClassesCB", weightFrame, "InterfaceOptionsCheckButtonTemplate")
+    allClassesCB:SetPoint("TOPLEFT", weightFrame, "TOPLEFT", 12, -62)
+    _G["AutoRollShowAllClassesCBText"]:SetText("Show profiles from all classes")
+    allClassesCB:SetChecked(false)
+    
+    local newBtn = CreateFrame("Button", nil, weightFrame, "UIPanelButtonTemplate")
+    newBtn:SetSize(66, 22) newBtn:SetPoint("TOPLEFT", weightFrame, "TOPLEFT", 15, -90) newBtn:SetText("New")
+    
+    local dupBtn = CreateFrame("Button", nil, weightFrame, "UIPanelButtonTemplate")
+    dupBtn:SetSize(66, 22) dupBtn:SetPoint("LEFT", newBtn, "RIGHT", 4, 0) dupBtn:SetText("Duplicate")
+    
+    renameBtn = CreateFrame("Button", nil, weightFrame, "UIPanelButtonTemplate")
+    renameBtn:SetSize(66, 22) renameBtn:SetPoint("LEFT", dupBtn, "RIGHT", 4, 0) renameBtn:SetText("Rename")
+    
+    deleteBtn = CreateFrame("Button", nil, weightFrame, "UIPanelButtonTemplate")
+    deleteBtn:SetSize(66, 22) deleteBtn:SetPoint("LEFT", renameBtn, "RIGHT", 4, 0) deleteBtn:SetText("Delete")
+    
     local scrollFrame = CreateFrame("ScrollFrame", "AutoRollWeightScrollFrame", weightFrame, "UIPanelScrollFrameTemplate") 
-    scrollFrame:SetPoint("TOPLEFT", 15, -45) scrollFrame:SetPoint("BOTTOMRIGHT", -35, 50) 
+    scrollFrame:SetPoint("TOPLEFT", 15, -118) scrollFrame:SetPoint("BOTTOMRIGHT", -35, 50) 
     
     local content = CreateFrame("Frame", nil, scrollFrame) content:SetWidth(210) content:SetHeight(520) scrollFrame:SetScrollChild(content)
     local dummy = CreateFrame("EditBox", nil, content, "InputBoxTemplate") dummy:SetSize(1, 1) dummy:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0) dummy:Hide()
@@ -199,31 +218,136 @@ function BuildWeightEditUI()
     end
     content:SetHeight(math.abs(totalYOffset) + 20)
     
-    weightFrame:SetScript("OnShow", function()
+    local function RefreshEditBoxes()
         isUpdating = true
         for key, ebBox in pairs(editBoxesTable) do
             local currentVal = tempWeights[key] or 0
             ebBox:SetText(tostring(currentVal)) ebBox:SetCursorPosition(0)
         end
         isUpdating = false
+    end
+    
+    local function RefreshButtonStates()
+        local protected = IsProtectedProfileName(activeProfile)
+        if protected then renameBtn:Disable() deleteBtn:Disable() else renameBtn:Enable() deleteBtn:Enable() end
+    end
+    
+    local function RefreshProfileDropdownText()
+        UIDropDownMenu_SetText(profileDropdown, activeProfile)
+    end
+    
+    local function SwitchToProfile(newProfileName)
+        activeProfile = newProfileName
+        SetActiveProfileName(activeProfile)
+        LoadTempWeightsFromActiveProfile()
+        title:SetText("|cFF3399FFModify weights: " .. activeProfile .. "|r")
+        RefreshProfileDropdownText()
+        RefreshButtonStates()
+        RefreshEditBoxes()
+    end
+    
+    UIDropDownMenu_Initialize(profileDropdown, function()
+        local list = showAllClasses and GetAllProfileNames() or GetProfilesForClass(charClass)
+        for _, name in ipairs(list) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = name
+            info.value = name
+            info.checked = (name == activeProfile)
+            info.func = function(self)
+                SwitchToProfile(self.value)
+                CloseDropDownMenus()
+            end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
+    RefreshProfileDropdownText()
+    RefreshButtonStates()
+    
+    allClassesCB:SetScript("OnClick", function(self) showAllClasses = not not self:GetChecked() end)
+    
+    -- =====================================================================
+    -- PROFILE MANAGEMENT: New / Duplicate / Rename / Delete, via StaticPopup
+    -- text-entry dialogs (the standard WoW pattern for a naming prompt).
+    -- =====================================================================
+    StaticPopupDialogs["AUTOROLL_NEW_PROFILE"] = {
+        text = "Name for the new blank profile:",
+        button1 = "Create", button2 = "Cancel", hasEditBox = true, maxLetters = 40,
+        OnShow = function(self) self.editBox:SetText("") self.editBox:SetFocus() end,
+        OnAccept = function(self)
+            local newName = self.editBox:GetText()
+            local ok, err = CreateNewStatProfile(newName, nil)
+            if ok then SwitchToProfile(newName)
+            elseif err then DEFAULT_CHAT_FRAME:AddMessage("|cFFFF4444[AutoRoll]|r " .. err) end
+        end,
+        EditBoxOnEnterPressed = function(self) self:GetParent().button1:Click() end,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    StaticPopupDialogs["AUTOROLL_DUPLICATE_PROFILE"] = {
+        text = "Name for the copy of \"%s\":",
+        button1 = "Create", button2 = "Cancel", hasEditBox = true, maxLetters = 40,
+        OnShow = function(self) self.editBox:SetText("") self.editBox:SetFocus() end,
+        OnAccept = function(self)
+            local newName = self.editBox:GetText()
+            local ok, err = CreateNewStatProfile(newName, activeProfile)
+            if ok then SwitchToProfile(newName)
+            elseif err then DEFAULT_CHAT_FRAME:AddMessage("|cFFFF4444[AutoRoll]|r " .. err) end
+        end,
+        EditBoxOnEnterPressed = function(self) self:GetParent().button1:Click() end,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    StaticPopupDialogs["AUTOROLL_RENAME_PROFILE"] = {
+        text = "New name for \"%s\":",
+        button1 = "Rename", button2 = "Cancel", hasEditBox = true, maxLetters = 40,
+        OnShow = function(self) self.editBox:SetText("") self.editBox:SetFocus() end,
+        OnAccept = function(self)
+            local newName = self.editBox:GetText()
+            local oldName = activeProfile
+            local ok, err = RenameStatProfile(oldName, newName)
+            if ok then SwitchToProfile(newName)
+            elseif err then DEFAULT_CHAT_FRAME:AddMessage("|cFFFF4444[AutoRoll]|r " .. err) end
+        end,
+        EditBoxOnEnterPressed = function(self) self:GetParent().button1:Click() end,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    StaticPopupDialogs["AUTOROLL_DELETE_PROFILE"] = {
+        text = "Delete profile \"%s\"? This cannot be undone.",
+        button1 = "Delete", button2 = "Cancel",
+        OnAccept = function(self)
+            local nameToDelete = activeProfile
+            local ok, err = DeleteStatProfile(nameToDelete)
+            if ok then SwitchToProfile(GetActiveProfileName())
+            elseif err then DEFAULT_CHAT_FRAME:AddMessage("|cFFFF4444[AutoRoll]|r " .. err) end
+        end,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    
+    newBtn:SetScript("OnClick", function() StaticPopup_Show("AUTOROLL_NEW_PROFILE") end)
+    dupBtn:SetScript("OnClick", function() StaticPopup_Show("AUTOROLL_DUPLICATE_PROFILE", activeProfile) end)
+    renameBtn:SetScript("OnClick", function() if not IsProtectedProfileName(activeProfile) then StaticPopup_Show("AUTOROLL_RENAME_PROFILE", activeProfile) end end)
+    deleteBtn:SetScript("OnClick", function() if not IsProtectedProfileName(activeProfile) then StaticPopup_Show("AUTOROLL_DELETE_PROFILE", activeProfile) end end)
+    
+    weightFrame:SetScript("OnShow", function()
+        RefreshProfileDropdownText()
+        RefreshButtonStates()
+        RefreshEditBoxes()
     end)
     
     local saveBtn = CreateFrame("Button", nil, weightFrame, "UIPanelButtonTemplate")
     saveBtn:SetSize(140, 24) saveBtn:SetPoint("BOTTOM", weightFrame, "BOTTOM", 0, 15) saveBtn:SetText("[ Save Weights ]")
     
     saveBtn:SetScript("OnClick", function()
-        if not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then return end
+        if not AutoRollConfig or not AutoRollConfig.statProfiles or not AutoRollConfig.statProfiles[activeProfile] then return end
         for k, v in pairs(tempWeights) do
             local cleanNum = tonumber(v)
             if not cleanNum or type(cleanNum) ~= "number" then cleanNum = 0 end
-            AutoRollConfig.classProfiles[playerClass][k] = cleanNum
+            AutoRollConfig.statProfiles[activeProfile][k] = cleanNum
         end
         
         isUpdating = true
         if weightFrame and weightFrame:IsShown() then weightFrame:Hide() weightFrame:Show() end
         isUpdating = false
         
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[AutoRoll]|r Saved successfully to the shared account-wide |cFFFFFFFF%s|r profile library slot!", playerClass))
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFF00FF00[AutoRoll]|r Saved successfully to the shared account-wide |cFFFFFFFF%s|r profile library slot!", activeProfile))
     end)
 end
 
@@ -286,7 +410,7 @@ function BuildUI()
     -- Visual Identity Header: Positioned cleanly right underneath the main title string label
     local versionText = settingsFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     versionText:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4) -- Snaps to the bottom left edge of title
-    versionText:SetText("|cFF999999v3.3 Stable Build|r")
+    versionText:SetText("|cFF999999v3.5 Stable Build|r")
 
 
     
@@ -469,7 +593,8 @@ GameTooltip:HookScript("OnTooltipSetItem", function(self)
         end
 
         DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00--- AutoRoll Diagnostic Scan: " .. itemLink .. " ---|r")
-        local playerClass = GetPlayerClassProfile()
+        local playerClass = GetActiveProfileName()
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Active Profile: " .. playerClass .. "]|r")
         local function PrintEquippedItemScore(equipLink, label, isRanged)
             if not equipLink then return 0 end
             DEFAULT_CHAT_FRAME:AddMessage("|cFF999999  [Scanning Equipped " .. label .. " Stats...]|r")
@@ -593,6 +718,7 @@ local debugLogFrame, debugEditBox = nil, nil
 function ShowInGameDebugLog(itemLink)
     if not itemLink then return end
     local playerClass = GetPlayerClassProfile()
+    local activeProfile = GetActiveProfileName()
     
     if not debugLogFrame then
         debugLogFrame = CreateFrame("Frame", "AutoRollDebugLogFrame", UIParent)
@@ -634,6 +760,7 @@ function ShowInGameDebugLog(itemLink)
     local linesOutput = {}
     table.insert(linesOutput, "Item Link: " .. tostring(itemLink))
     table.insert(linesOutput, "Class: " .. tostring(playerClass))
+    table.insert(linesOutput, "Active Profile: " .. tostring(activeProfile))
     table.insert(linesOutput, "---------------------------------------------")
     
     for i = 1, scannerTooltip:NumLines() do

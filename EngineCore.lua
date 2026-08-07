@@ -30,16 +30,16 @@ STAT_PATTERNS = {
     { key = "Stamina", pats = { "%+(%d+)%s*Stamina", "%+(%d+)%s*stamina" } },
     { key = "Intellect", pats = { "%+(%d+)%s*Intellect", "%+(%d+)%s*intellect" } },
     { key = "Spirit", pats = { "%+(%d+)%s*Spirit", "%+(%d+)%s*spirit" } },
-    { key = "Crit", pats = { "critical strike rating by (%d+)", "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)" } },
-    { key = "Hit", pats = { "hit rating by (%d+)", "hit rating", "Hit Rating", "Improves hit rating by (%d+)" } },
-    { key = "Haste", pats = { "haste rating by (%d+)", "haste rating", "Haste Rating", "Improves haste rating by (%d+)" } },
-    { key = "Ranged Attack Power", pats = { "ranged attack power by (%d+)", "Ranged Attack Power", "ranged attack power" } },
-    { key = "Attack Power", pats = { "attack power by (%d+)", "%+(%d+)%s*Attack Power", "Attack Power" } },
-    { key = "Spell Power", pats = { "spell power by (%d+)", "spell power", "Spell Power", "Increases spell power by (%d+)" } },
-    { key = "Spell Damage", pats = { "spell damage by (%d+)", "Increases spell damage by (%d+)" } },
-    { key = "Armor Pen", pats = { "armor penetration rating by (%d+)", "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)" } },
-    { key = "Spell Pen", pats = { "spell penetration by (%d+)", "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)" } },
-    { key = "Expertise", pats = { "expertise rating by (%d+)", "expertise rating", "Expertise", "Improves expertise rating by (%d+)" } },
+    { key = "Crit", pats = { "critical strike rating by (%d+)", "critical strike rating", "Critical Strike", "crit rating", "Crit Rating", "Improves critical strike rating by (%d+)", "%+(%d+)%s*[Cc]rit%s*[Rr]ating?", "%+(%d+)%s*[Cc]ritical%s*[Ss]trike%s*[Rr]ating?" } },
+    { key = "Hit", pats = { "hit rating by (%d+)", "hit rating", "Hit Rating", "Improves hit rating by (%d+)", "%+(%d+)%s*[Hh]it%s*[Rr]ating?", "%+(%d+)%s*[Hh]it" } },
+    { key = "Haste", pats = { "haste rating by (%d+)", "haste rating", "Haste Rating", "Improves haste rating by (%d+)", "%+(%d+)%s*[Hh]aste%s*[Rr]ating?", "%+(%d+)%s*[Hh]aste" } },
+    { key = "Ranged Attack Power", pats = { "ranged attack power by (%d+)", "Ranged Attack Power", "ranged attack power", "%+(%d+)%s*[Rr]anged%s*[Aa]ttack%s*[Pp]ower" } },
+    { key = "Attack Power", pats = { "attack power by (%d+)", "%+(%d+)%s*Attack Power", "Attack Power", "%+(%d+)%s*[Aa]ttack%s*[Pp]ower" } },
+    { key = "Spell Power", pats = { "spell power by (%d+)", "spell power", "Spell Power", "Increases spell power by (%d+)", "%+(%d+)%s*[Ss]pell%s*[Pp]ower" } },
+    { key = "Spell Damage", pats = { "spell damage by (%d+)", "Increases spell damage by (%d+)", "%+(%d+)%s*[Ss]pell%s*[Dd]amage" } },
+    { key = "Armor Pen", pats = { "armor penetration rating by (%d+)", "armor penetration", "Armor Pen", "Improves armor penetration rating by (%d+)", "%+(%d+)%s*[Aa]rmor%s*[Pp]en%s*[Rr]ating?", "%+(%d+)%s*[Aa]rmor%s*[Pp]en" } },
+    { key = "Spell Pen", pats = { "spell penetration by (%d+)", "spell penetration", "Spell Pen", "Increases spell penetration by (%d+)", "%+(%d+)%s*[Ss]pell%s*[Pp]en%s*[Rr]ating?", "%+(%d+)%s*[Ss]pell%s*[Pp]en" } },
+    { key = "Expertise", pats = { "expertise rating by (%d+)", "expertise rating", "Expertise", "Improves expertise rating by (%d+)", "%+(%d+)%s*[Ee]xpertise%s*[Rr]ating?", "%+(%d+)%s*[Ee]xpertise" } },
     { key = "Weapon DPS", pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
     { key = "Ranged DPS", pats = { "((%d+%.?%d*)) damage per second", "((%d+%.?%d*)) DPS" } },
     { key = "Resilience", pats = { "resilience rating by (%d+)", "resilience rating", "Resilience" } },
@@ -63,7 +63,7 @@ function GetBlankCharSettings()
     }
 end
 
-defaults = { buttonX = 0, buttonY = 150, classProfiles = {}, charSettings = {} }
+defaults = { buttonX = 0, buttonY = 150, classProfiles = {}, statProfiles = {}, charSettings = {} }
 scannerTooltip = CreateFrame("GameTooltip", "AutoRollScannerTooltip", nil, "GameTooltipTemplate")
 local SMART_STATS_DELAY_SECONDS = 1.0
 
@@ -95,20 +95,159 @@ function GetCharacterUniqueKey()
 end
 
 -- =========================================================================
+-- MULTI-PROFILE LIBRARY: Profiles are stored flat in AutoRollConfig.statProfiles,
+-- keyed by name (not by class), so a class can have any number of named specs
+-- ("Reaper - Tank", "Reaper - DPS", etc). Each character just remembers which
+-- named profile it's currently pointed at via charSettings[charKey].activeStatProfile.
+-- The 21 built-in class-name-matching profiles (seeded from AutoRoll_ClassTemplates
+-- in Profiles.lua) are treated as protected defaults: editable, but not renameable
+-- or deletable, so there's always a safe fallback for every class.
+-- =========================================================================
+local function EscapePattern(s)
+    return (s:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%1"))
+end
+
+function IsProtectedProfileName(name)
+    if not name or not AutoRoll_ClassTemplates then return false end
+    for templateName, _ in pairs(AutoRoll_ClassTemplates) do
+        if string.lower(templateName) == string.lower(name) then return true end
+    end
+    return false
+end
+
+-- Makes sure AutoRollConfig.statProfiles[profileName] exists, seeding it from a
+-- matching AutoRoll_ClassTemplates entry if this is the first time it's used,
+-- or from a blank all-zero table otherwise.
+function EnsureProfileExists(profileName)
+    if not profileName or profileName == "" or not AutoRollConfig then return end
+    if not AutoRollConfig.statProfiles then AutoRollConfig.statProfiles = {} end
+    if AutoRollConfig.statProfiles[profileName] then return end
+    local foundTemplate = nil
+    if AutoRoll_ClassTemplates then
+        for templateName, templateData in pairs(AutoRoll_ClassTemplates) do
+            if string.lower(templateName) == string.lower(profileName) then foundTemplate = templateData break end
+        end
+    end
+    if foundTemplate then
+        AutoRollConfig.statProfiles[profileName] = {}
+        for k, v in pairs(foundTemplate) do AutoRollConfig.statProfiles[profileName][k] = v end
+    else
+        AutoRollConfig.statProfiles[profileName] = GetBlankStatTable()
+    end
+end
+
+-- Returns the profile name this character currently has active, defaulting to
+-- (and auto-selecting) their own class's default profile the first time they're seen.
+function GetActiveProfileName()
+    if not AutoRollConfig or not AutoRollConfig.charSettings then return GetPlayerClassProfile() end
+    local charKey = GetCharacterUniqueKey()
+    local cCfg = AutoRollConfig.charSettings[charKey]
+    local profileName = cCfg and cCfg.activeStatProfile
+    if not profileName or profileName == "" then
+        profileName = GetPlayerClassProfile()
+        if cCfg then cCfg.activeStatProfile = profileName end
+    end
+    EnsureProfileExists(profileName)
+    return profileName
+end
+
+-- Points this character at a different (existing or new) named profile.
+function SetActiveProfileName(profileName)
+    if not AutoRollConfig or not AutoRollConfig.charSettings or not profileName or profileName == "" then return end
+    local charKey = GetCharacterUniqueKey()
+    if not AutoRollConfig.charSettings[charKey] then AutoRollConfig.charSettings[charKey] = GetBlankCharSettings() end
+    EnsureProfileExists(profileName)
+    AutoRollConfig.charSettings[charKey].activeStatProfile = profileName
+end
+
+-- Profiles relevant to a given class: the exact-name default, plus any custom
+-- profile named "ClassName - Something" (e.g. "Reaper - Tank").
+function GetProfilesForClass(className)
+    local list = {}
+    if AutoRollConfig and AutoRollConfig.statProfiles and className then
+        local escapedClass = EscapePattern(string.lower(className))
+        for name, _ in pairs(AutoRollConfig.statProfiles) do
+            local lname = string.lower(name)
+            if lname == string.lower(className) or string.find(lname, "^" .. escapedClass .. "%s*%-") then
+                table.insert(list, name)
+            end
+        end
+    end
+    table.sort(list, function(a, b) return string.lower(a) < string.lower(b) end)
+    return list
+end
+
+-- Every profile in the library, across all classes.
+function GetAllProfileNames()
+    local list = {}
+    if AutoRollConfig and AutoRollConfig.statProfiles then
+        for name, _ in pairs(AutoRollConfig.statProfiles) do table.insert(list, name) end
+    end
+    table.sort(list, function(a, b) return string.lower(a) < string.lower(b) end)
+    return list
+end
+
+-- Creates a new named profile, optionally cloning an existing profile's weights
+-- (falls back to an all-zero table if baseName is nil or not found).
+function CreateNewStatProfile(newName, baseName)
+    if not AutoRollConfig then return false, "Addon not ready yet." end
+    if not AutoRollConfig.statProfiles then AutoRollConfig.statProfiles = {} end
+    if not newName or newName == "" then return false, "Name cannot be empty." end
+    if AutoRollConfig.statProfiles[newName] then return false, "A profile with that name already exists." end
+    local baseWeights = (baseName and AutoRollConfig.statProfiles[baseName]) or GetBlankStatTable()
+    AutoRollConfig.statProfiles[newName] = {}
+    for k, v in pairs(baseWeights) do AutoRollConfig.statProfiles[newName][k] = v end
+    return true
+end
+
+-- Renames a profile in place, repointing every character currently using it.
+function RenameStatProfile(oldName, newName)
+    if not AutoRollConfig or not AutoRollConfig.statProfiles then return false, "Addon not ready yet." end
+    if not newName or newName == "" then return false, "Name cannot be empty." end
+    if IsProtectedProfileName(oldName) then return false, "Default class profiles can't be renamed." end
+    if not AutoRollConfig.statProfiles[oldName] then return false, "Profile not found." end
+    if AutoRollConfig.statProfiles[newName] then return false, "A profile with that name already exists." end
+    AutoRollConfig.statProfiles[newName] = AutoRollConfig.statProfiles[oldName]
+    AutoRollConfig.statProfiles[oldName] = nil
+    if AutoRollConfig.charSettings then
+        for _, cCfg in pairs(AutoRollConfig.charSettings) do
+            if cCfg.activeStatProfile == oldName then cCfg.activeStatProfile = newName end
+        end
+    end
+    return true
+end
+
+-- Deletes a custom profile. Any character pointed at it falls back to their own
+-- class's default profile (re-seeded automatically via GetActiveProfileName).
+function DeleteStatProfile(name)
+    if not AutoRollConfig or not AutoRollConfig.statProfiles then return false, "Addon not ready yet." end
+    if IsProtectedProfileName(name) then return false, "Default class profiles can't be deleted." end
+    if not AutoRollConfig.statProfiles[name] then return false, "Profile not found." end
+    AutoRollConfig.statProfiles[name] = nil
+    if AutoRollConfig.charSettings then
+        for _, cCfg in pairs(AutoRollConfig.charSettings) do
+            if cCfg.activeStatProfile == name then cCfg.activeStatProfile = nil end
+        end
+    end
+    return true
+end
+
+-- =========================================================================
 -- SHARED SCORING ENGINE: Single source of truth for reading a populated
 -- tooltip's lines and turning them into a class-weighted score. Used by
 -- CalculateItemScore below, and by the Ctrl+Hover diagnostic and equipped
 -- weapon breakdown in InterfaceGUI.lua, so all three always agree.
 --   tooltipFrame  - a GameTooltip-type frame that already has SetHyperlink
 --                    (or SetItem) called on it
---   playerClass   - the class key into AutoRollConfig.classProfiles
+--   profileName   - the profile-library key into AutoRollConfig.statProfiles
+--                    (an active profile name, not necessarily a class name)
 --   isRangedItem  - true if the item is a bow/gun/crossbow/thrown/ranged slot
 --   verbose       - if true, prints each matched stat line to chat
 --   linePrefix    - optional chat-log tag, e.g. "(MH)" or "(OH)"
 -- =========================================================================
-function ScoreTooltipLines(tooltipFrame, playerClass, isRangedItem, verbose, linePrefix)
+function ScoreTooltipLines(tooltipFrame, profileName, isRangedItem, verbose, linePrefix)
     local totalScore = 0
-    local profile = AutoRollConfig and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass]
+    local profile = AutoRollConfig and AutoRollConfig.statProfiles and AutoRollConfig.statProfiles[profileName]
     local tipName = tooltipFrame:GetName()
     for i = 1, tooltipFrame:NumLines() do
         local leftLine = _G[tipName .. "TextLeft" .. i] local rightLine = _G[tipName .. "TextRight" .. i]
@@ -156,19 +295,19 @@ function ScoreTooltipLines(tooltipFrame, playerClass, isRangedItem, verbose, lin
 end
 
 function CalculateItemScore(itemLink)
-    local playerClass = GetPlayerClassProfile()
-    if not itemLink or not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then return 0 end
+    local profileName = GetActiveProfileName()
+    if not itemLink or not AutoRollConfig or not AutoRollConfig.statProfiles or not AutoRollConfig.statProfiles[profileName] then return 0 end
     local _, _, _, _, _, _, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     local isRangedItem = (itemEquipLoc == "INVTYPE_RANGED" or itemEquipLoc == "INVTYPE_RANGEDRIGHT" or
         itemSubClass == "Bows" or itemSubClass == "Guns" or itemSubClass == "Crossbows" or itemSubClass == "Thrown")
     scannerTooltip:SetOwner(WorldFrame, "ANCHOR_NONE") scannerTooltip:ClearLines() scannerTooltip:SetHyperlink(itemLink)
-    local totalScore = ScoreTooltipLines(scannerTooltip, playerClass, isRangedItem, false)
+    local totalScore = ScoreTooltipLines(scannerTooltip, profileName, isRangedItem, false)
     scannerTooltip:Hide() return totalScore
 end
 
 function GetStatModuleComparisonScores(itemLink, itemType, itemSubClass, itemEquipLoc)
-    local playerClass = GetPlayerClassProfile()
-    if not itemLink or not AutoRollConfig or not AutoRollConfig.classProfiles or not AutoRollConfig.classProfiles[playerClass] then
+    local profileName = GetActiveProfileName()
+    if not itemLink or not AutoRollConfig or not AutoRollConfig.statProfiles or not AutoRollConfig.statProfiles[profileName] then
         return 0, 0
     end
 
@@ -220,7 +359,7 @@ function ProcessLootRoll(rollID, itemLink)
     if not AutoRollConfig or not AutoRollConfig.charSettings then return end
     local charKey = GetCharacterUniqueKey() local cCfg = AutoRollConfig.charSettings[charKey]
     if not cCfg or not cCfg.enabled or handledRolls[rollID] then return end
-    local playerClass = GetPlayerClassProfile()
+    local profileName = GetActiveProfileName()
     local itemName, _, itemRarity, _, _, itemType, itemSubClass, _, itemEquipLoc = GetItemInfo(itemLink)
     if not itemName then return end
     local rollNames = { [1] = "Need", [2] = "Greed", [3] = "Pass" }
@@ -258,9 +397,9 @@ function ProcessLootRoll(rollID, itemLink)
     -- =========================================================================
     -- PRIORITY 2: SMART STATS UPGRADE TRACKER (Prioritizes item slot upgrades)
     -- =========================================================================
-    if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
+    if cCfg.statModuleEnabled and itemEquipLoc and SLOT_MAP[itemEquipLoc] and AutoRollConfig.statProfiles and AutoRollConfig.statProfiles[profileName] then
         local droppedScore, equippedScore = GetStatModuleComparisonScores(itemLink, itemType, itemSubClass, itemEquipLoc)
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Stat compare -> candidate=%.2f equipped=%.2f", droppedScore, equippedScore))
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Stat compare (profile: %s) -> candidate=%.2f equipped=%.2f", profileName, droppedScore, equippedScore))
         if droppedScore > equippedScore then 
             if alertTextString then alertTextString:SetText("|cFF3399FFRoll NEED! Stat Upgrade!|r") end
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cFFFFD100[AutoRoll Trace]|r Stat auto-roll -> %s [Need], delta=%.2f", itemLink, droppedScore - equippedScore))
@@ -476,26 +615,28 @@ function InitializeAddon()
     end
     local charKey = GetCharacterUniqueKey()
     if not AutoRollConfig.charSettings[charKey] then AutoRollConfig.charSettings[charKey] = GetBlankCharSettings() end
-    local playerClass = GetPlayerClassProfile() local isProfileBlank = true
-    if AutoRollConfig.classProfiles[playerClass] then
-        for k, val in pairs(AutoRollConfig.classProfiles[playerClass]) do if val and val ~= 0 then isProfileBlank = false break end end
+    local cCfg = AutoRollConfig.charSettings[charKey]
+    local playerClass = GetPlayerClassProfile()
+    if not AutoRollConfig.statProfiles then AutoRollConfig.statProfiles = {} end
+
+    -- One-time migration: pre-v3.4 saves kept a single profile per class in
+    -- classProfiles[className]. Fold that into the new named-profile library
+    -- (if a statProfiles entry with that name doesn't already exist) so nobody
+    -- loses their tuned weights on upgrade.
+    if AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] and not AutoRollConfig.statProfiles[playerClass] then
+        AutoRollConfig.statProfiles[playerClass] = {}
+        for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do AutoRollConfig.statProfiles[playerClass][k] = v end
     end
-    if not AutoRollConfig.classProfiles[playerClass] or isProfileBlank then
-        if AutoRoll_ClassTemplates then
-            local foundTemplate = nil
-            for templateName, templateData in pairs(AutoRoll_ClassTemplates) do
-                if string.lower(templateName) == string.lower(playerClass) then foundTemplate = templateData break end
-            end
-            if foundTemplate then
-                AutoRollConfig.classProfiles[playerClass] = {}
-                for k, v in pairs(foundTemplate) do AutoRollConfig.classProfiles[playerClass][k] = v end
-            else AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable() end
-        else AutoRollConfig.classProfiles[playerClass] = GetBlankStatTable() end
-    end
-    if AutoRollConfig.classProfiles[playerClass]["Ranged Attack Power"] == nil then AutoRollConfig.classProfiles[playerClass]["Ranged Attack Power"] = 0 end
-    if AutoRollConfig.classProfiles and AutoRollConfig.classProfiles[playerClass] then
-        for k, v in pairs(AutoRollConfig.classProfiles[playerClass]) do tempWeights[k] = tonumber(v) or 0 end
-    end
+
+    -- This character's active profile defaults to their own class's profile the
+    -- first time they're seen, exactly matching pre-v3.4 behavior until they
+    -- deliberately pick something else from the Smart Stats dropdown.
+    if not cCfg.activeStatProfile or cCfg.activeStatProfile == "" then cCfg.activeStatProfile = playerClass end
+    EnsureProfileExists(cCfg.activeStatProfile)
+    local activeProfile = AutoRollConfig.statProfiles[cCfg.activeStatProfile]
+
+    if activeProfile["Ranged Attack Power"] == nil then activeProfile["Ranged Attack Power"] = 0 end
+    for k, v in pairs(activeProfile) do tempWeights[k] = tonumber(v) or 0 end
     -- Skills Cache Ingestion: Replaces old manual overrides with live server metrics
     ScanCharacterSkillsEngine()
 
